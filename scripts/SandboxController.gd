@@ -21,6 +21,9 @@ var _screenshot_path: String = ""
 var _screenshot_frames_left: int = 0
 
 @onready var _camera: Camera3D = $Camera3D
+@onready var _ball: RigidBody3D = $Ball as RigidBody3D
+@onready var _launcher: BallLauncher = $BallLauncher
+@onready var _telemetry: Label = $HUD/Telemetry
 
 
 func _ready() -> void:
@@ -79,19 +82,31 @@ func _setup_screenshot_from_cli() -> void:
 
 
 func _process(_delta: float) -> void:
+	_update_telemetry()
 	if not _screenshot_pending:
 		return
 	if _screenshot_frames_left > 0:
 		_screenshot_frames_left -= 1
-		if _screenshot_frames_left % 15 == 0:
-			var ball: Node3D = get_node_or_null("Ball")
-			if ball is RigidBody3D:
-				var rb: RigidBody3D = ball
-				print("[trace] frames_left=%d pos=%s vel=%s" % [
-					_screenshot_frames_left, rb.global_position, rb.linear_velocity,
-				])
+		if _screenshot_frames_left % 15 == 0 and _ball != null:
+			print("[trace] frames_left=%d pos=%s vel=%s" % [
+				_screenshot_frames_left, _ball.global_position, _ball.linear_velocity,
+			])
 		return
 	_capture_screenshot()
+
+
+func _update_telemetry() -> void:
+	if _telemetry == null or _ball == null:
+		return
+	var v: Vector3 = _ball.linear_velocity
+	var w: Vector3 = _ball.angular_velocity
+	var speed_kmh: float = v.length() * 3.6
+	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m" % [
+		_ball.global_position.x, _ball.global_position.y, _ball.global_position.z,
+		speed_kmh, v.length(),
+		w.length(),
+		_ball.global_position.y,
+	]
 
 
 func _capture_screenshot() -> void:
@@ -112,9 +127,34 @@ func _capture_screenshot() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not quit_on_escape:
+	if event is InputEventKey and event.pressed and not event.echo:
+		_handle_key(event as InputEventKey)
+	elif event is InputEventMouseButton and event.pressed:
+		_handle_mouse(event as InputEventMouseButton)
+
+
+func _handle_key(event: InputEventKey) -> void:
+	match event.keycode:
+		KEY_ESCAPE:
+			if quit_on_escape:
+				get_tree().quit()
+		KEY_SPACE:
+			if _launcher: _launcher.launch_vertical()
+		KEY_H:
+			if _launcher: _launcher.launch_horizontal()
+		KEY_R:
+			if _launcher: _launcher.reset_ball()
+
+
+func _handle_mouse(event: InputEventMouseButton) -> void:
+	if event.button_index != MOUSE_BUTTON_LEFT:
 		return
-	if event is InputEventKey:
-		var key_event: InputEventKey = event
-		if key_event.pressed and key_event.keycode == KEY_ESCAPE:
-			get_tree().quit()
+	if _camera == null or _launcher == null:
+		return
+	var from: Vector3 = _camera.project_ray_origin(event.position)
+	var dir: Vector3 = _camera.project_ray_normal(event.position)
+	if dir.y >= -0.001:
+		return
+	var t: float = -from.y / dir.y
+	var ground_point: Vector3 = from + dir * t
+	_launcher.launch_to_point(ground_point)

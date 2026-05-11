@@ -110,7 +110,23 @@ _(to be populated during implementation)_
 
 ### Sprint 01 Calibration Sessions
 
-_(to be populated per session — date, focus, before / after values, observations)_
+| Date       | Task   | Focus                                  | Notes |
+|------------|--------|----------------------------------------|-------|
+| 2026-05-11 | T01    | Field + camera ISS-broadcast view      | Camera at (0, 20, 40), FOV 45° validated visually. Pitch ~27° |
+| 2026-05-11 | T02    | Custom integrator + drag               | Gravity + drag traces match closed-form within drag bias |
+| 2026-05-11 | T02.1  | Pentagons texture + visual scale       | `debug_visual_scale = 1.0` (real). Spin readability deferred to predictor |
+| 2026-05-11 | T03    | Ground + walls bounce                  | 5 bounces from y=8, e_effective ~0.59 vs target 0.60 (drag loss) |
+| 2026-05-11 | T04    | GUT 4/4 PASS                           | Terminal v 19.633 vs 19.634; no tunneling at 50 m/s |
+| 2026-05-11 | T05    | Launcher + HUD                         | SPACE / H / R / LMB key map + on-screen telemetry. Ball spawn moved to (0, 1.5, 0) — quick reset cadence |
+
+### Sprint 01 Exit Criteria
+
+| # | Criterion                                                                | Status   | Evidence |
+|---|--------------------------------------------------------------------------|----------|----------|
+| 1 | Vertical-launched ball bounces with correct decay                        | DONE     | T03 bounce log: 8.36 → 4.88 → 2.88 → 1.71 → 1.02 m/s, ratio ≈ 0.59 (target e = 0.6, drag loss ≈ 3%) |
+| 2 | Horizontal-launched ball decelerates visibly from drag                   | DONE     | T05 HUD speedometer + T04 terminal-velocity test (19.633 ≈ 19.634 m/s closed-form, rel.err 0.0000) |
+| 3 | Spin visible on ball axis                                                | DONE     | Pentagons SVG texture + angular kinematic update in custom integrator (S01-A12/A13) |
+| 4 | FPS stable ≥ 60 in editor                                                | TO VERIFY | Visual confirmation pending (headless cannot report fps); 120 Hz physics tick measured with no skipped steps |
 
 ---
 
