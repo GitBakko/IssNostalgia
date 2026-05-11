@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" path="res://scenes/Field.tscn" id="2_field"]
 [ext_resource type="PackedScene" path="res://scenes/Ball.tscn" id="3_ball"]
 [ext_resource type="PackedScene" path="res://scenes/BallLauncher.tscn" id="4_launcher"]
+[ext_resource type="PackedScene" path="res://scenes/TrajectoryVisualizer.tscn" id="5_traj"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -30,6 +31,9 @@ initial_velocity = Vector3(0, 0, 0)
 initial_angular_velocity = Vector3(0, 0, 0)
 
 [node name="BallLauncher" parent="." instance=ExtResource("4_launcher")]
+
+[node name="TrajectoryVisualizer" parent="." instance=ExtResource("5_traj")]
+ball_path = NodePath("../Ball")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 

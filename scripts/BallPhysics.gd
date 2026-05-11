@@ -404,6 +404,34 @@ func get_current_substeps() -> int:
 	return _current_substeps
 
 
+## Forward predictor (Sprint 2 T05). Simulates the ball forward from the
+## given state by `steps` substeps of `sub_dt` seconds each, applying the
+## same gravity + drag + Magnus + knuckle + ground + walls + rolling
+## resistance as the live integrator (M06 / M07). Returns the array of
+## positions sampled at every step. Pure: no engine state read or written.
+func predict_forward(p0: Vector3, v0: Vector3, omega0: Vector3,
+		time0: float, steps: int, sub_dt: float) -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	out.resize(steps)
+	var p: Vector3 = p0
+	var v: Vector3 = v0
+	var t: float = time0
+	for i in steps:
+		t += sub_dt
+		var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega0)
+		p = step.position
+		v = step.velocity
+		if config.knuckle_enabled:
+			v += knuckle_acceleration(v0, omega0, t) * sub_dt
+		var col: Dictionary = resolve_static_collisions(p, v)
+		if col.collided:
+			p = col.position
+			v = col.velocity
+		v = apply_rolling_resistance(p, v, sub_dt)
+		out[i] = p
+	return out
+
+
 ## Convenience for tests / launcher: theoretical terminal velocity for a
 ## freely falling ball in the current air density (no spin, no walls).
 func terminal_velocity() -> float:
