@@ -1,7 +1,8 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/SandboxController.gd" id="1_controller"]
 [ext_resource type="PackedScene" path="res://scenes/Field.tscn" id="2_field"]
+[ext_resource type="PackedScene" path="res://scenes/Ball.tscn" id="3_ball"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -21,6 +22,10 @@ exposure_multiplier = 1.0
 script = ExtResource("1_controller")
 
 [node name="Field" parent="." instance=ExtResource("2_field")]
+
+[node name="Ball" parent="." instance=ExtResource("3_ball")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+initial_velocity = Vector3(0, 0, 0)
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 35, 20)
