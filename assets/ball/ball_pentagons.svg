@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Equirectangular texture for a soccer-ball SphereMesh.
+  Godot's SphereMesh UVs are equirectangular: U = longitude (0..1),
+  V = latitude (0 at north pole, 1 at south pole). We place 12 dark
+  "pentagons" at the vertices of an icosahedron (approximated as
+  ellipses to compensate for the equirectangular horizontal stretch
+  at non-zero latitude).
+
+  Layout:
+    - 2 polar caps  (lat ±90°, drawn as full-width thin bands)
+    - 5 upper ring  (lat ~+26.57°, lon 0,72,144,216,288)
+    - 5 lower ring  (lat ~-26.57°, lon 36,108,180,252,324)
+  Plus thin meridian / equator lines so spin around ANY axis is
+  immediately readable from the camera.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1024" height="512"
+     viewBox="0 0 1024 512"
+     preserveAspectRatio="none">
+
+  <!-- Off-white grass-toned base -->
+  <rect width="1024" height="512" fill="#f4f4f4"/>
+
+  <!-- Equator + meridians for spin readability -->
+  <g stroke="#8c8c8c" stroke-width="1.5" fill="none">
+    <line x1="0" y1="256" x2="1024" y2="256"/>
+    <line x1="128"  y1="0" x2="128"  y2="512"/>
+    <line x1="384"  y1="0" x2="384"  y2="512"/>
+    <line x1="640"  y1="0" x2="640"  y2="512"/>
+    <line x1="896"  y1="0" x2="896"  y2="512"/>
+  </g>
+
+  <!-- Polar caps (icosahedron N+S "pentagons", appear as discs on sphere) -->
+  <rect x="0" y="0"   width="1024" height="36" fill="#1a1a1a"/>
+  <rect x="0" y="476" width="1024" height="36" fill="#1a1a1a"/>
+
+  <!-- Upper ring at lat ~+26.5° => v = (90-26.5)/180*512 = 180.6 -->
+  <g fill="#1a1a1a">
+    <ellipse cx="0"    cy="181" rx="62" ry="48"/>
+    <ellipse cx="1024" cy="181" rx="62" ry="48"/>
+    <ellipse cx="205"  cy="181" rx="62" ry="48"/>
+    <ellipse cx="410"  cy="181" rx="62" ry="48"/>
+    <ellipse cx="614"  cy="181" rx="62" ry="48"/>
+    <ellipse cx="819"  cy="181" rx="62" ry="48"/>
+  </g>
+
+  <!-- Lower ring at lat ~-26.5° => v = (90+26.5)/180*512 = 331.4 -->
+  <g fill="#1a1a1a">
+    <ellipse cx="102"  cy="331" rx="62" ry="48"/>
+    <ellipse cx="307"  cy="331" rx="62" ry="48"/>
+    <ellipse cx="512"  cy="331" rx="62" ry="48"/>
+    <ellipse cx="717"  cy="331" rx="62" ry="48"/>
+    <ellipse cx="922"  cy="331" rx="62" ry="48"/>
+  </g>
+</svg>

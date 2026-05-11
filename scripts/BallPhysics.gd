@@ -25,6 +25,15 @@ const MIN_SPEED_FOR_DRAG: float = 0.001
 
 @export var config: PhysicsConfig
 @export var initial_velocity: Vector3 = Vector3.ZERO
+@export var initial_angular_velocity: Vector3 = Vector3.ZERO
+
+## Debug-only visual scale applied to the MeshInstance3D, NOT to the
+## collision shape. With a 42 m camera distance the real 11 cm ball is
+## only ~7 px wide, which makes the spin axis impossible to read in the
+## sandbox. The physics radius stays at `config.ball_radius` so all
+## formulas remain correct; only the rendered mesh is enlarged.
+## Set to 1.0 once a proper near-camera / zoom system is in place.
+@export var debug_visual_scale: float = 1.0
 
 var _current_substeps: int = SUBSTEPS_LOW
 
@@ -41,8 +50,20 @@ func _ready() -> void:
 	max_contacts_reported = 8
 	mass = config.ball_mass
 	gravity_scale = 0.0
+	_apply_debug_visual_scale()
 	if initial_velocity != Vector3.ZERO:
 		linear_velocity = initial_velocity
+	if initial_angular_velocity != Vector3.ZERO:
+		angular_velocity = initial_angular_velocity
+
+
+func _apply_debug_visual_scale() -> void:
+	if is_equal_approx(debug_visual_scale, 1.0):
+		return
+	var mesh: MeshInstance3D = get_node_or_null("MeshInstance3D")
+	if mesh == null:
+		return
+	mesh.scale = Vector3.ONE * debug_visual_scale
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
@@ -61,6 +82,17 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	state.linear_velocity = next.velocity
 	var t: Transform3D = state.transform
 	t.origin = next.position
+	# Angular kinematic update. Sprint 1 applies no torques, so spin is
+	# constant unless modified externally; but with `custom_integrator=true`
+	# Godot does NOT auto-rotate the transform from `angular_velocity`, we
+	# must do it ourselves. Sprint 3 (Cross-2002) will start *modifying*
+	# angular_velocity at bounces; for now we just integrate the kinematic
+	# rotation so the mesh visibly spins.
+	var omega: Vector3 = state.angular_velocity
+	if omega.length_squared() > 1e-12:
+		var axis: Vector3 = omega.normalized()
+		var angle: float = omega.length() * sub_dt
+		t.basis = Basis(axis, angle) * t.basis
 	state.transform = t
 
 

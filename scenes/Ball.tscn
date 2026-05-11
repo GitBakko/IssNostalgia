@@ -1,22 +1,25 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/BallPhysics.gd" id="1_ball_physics"]
 [ext_resource type="Resource" path="res://resources/PhysicsConfig.tres" id="2_config"]
+[ext_resource type="Texture2D" path="res://assets/ball/ball_pentagons.svg" id="3_ball_tex"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_ball"]
 radius = 0.11
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ball"]
-albedo_color = Color(0.97, 0.97, 0.97, 1)
-roughness = 0.5
+albedo_color = Color(1, 1, 1, 1)
+albedo_texture = ExtResource("3_ball_tex")
+texture_filter = 3
+roughness = 0.45
 metallic = 0.0
 
 [sub_resource type="SphereMesh" id="SphereMesh_ball"]
 material = SubResource("StandardMaterial3D_ball")
 radius = 0.11
 height = 0.22
-radial_segments = 24
-rings = 12
+radial_segments = 48
+rings = 24
 
 [node name="Ball" type="RigidBody3D"]
 mass = 0.43
@@ -26,6 +29,7 @@ contact_monitor = true
 max_contacts_reported = 8
 script = ExtResource("1_ball_physics")
 config = ExtResource("2_config")
+debug_visual_scale = 4.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("SphereShape3D_ball")

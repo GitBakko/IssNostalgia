@@ -53,8 +53,16 @@ func _setup_screenshot_from_cli() -> void:
 		else:
 			_screenshot_path = SCREENSHOT_DEFAULT_PATH
 		# Wait a few frames so the renderer has flushed at least one full pass.
+		# Default: 5 frames. Can be overridden by passing a number after the
+		# path, e.g. `-- --capture-screenshot t.png 60`.
 		_screenshot_frames_left = 5
-		print("[Sandbox] screenshot pending, target: %s" % _screenshot_path)
+		if idx + 2 < args.size():
+			var maybe_frames: String = args[idx + 2]
+			if maybe_frames.is_valid_int():
+				_screenshot_frames_left = max(1, int(maybe_frames))
+		print("[Sandbox] screenshot pending: %s (after %d frames)" % [
+			_screenshot_path, _screenshot_frames_left,
+		])
 
 
 func _process(_delta: float) -> void:
@@ -62,6 +70,13 @@ func _process(_delta: float) -> void:
 		return
 	if _screenshot_frames_left > 0:
 		_screenshot_frames_left -= 1
+		if _screenshot_frames_left % 15 == 0:
+			var ball: Node3D = get_node_or_null("Ball")
+			if ball is RigidBody3D:
+				var rb: RigidBody3D = ball
+				print("[trace] frames_left=%d pos=%s vel=%s" % [
+					_screenshot_frames_left, rb.global_position, rb.linear_velocity,
+				])
 		return
 	_capture_screenshot()
 
