@@ -39,25 +39,24 @@ func _resolve_ball() -> BallPhysics:
 	return sibling as BallPhysics
 
 
-## Hard reset: place at spawn, zero velocity and spin.
+## Hard reset: schedule a teleport + zero velocity / spin. The change
+## is committed at the next physics tick by `BallPhysics._integrate_forces`
+## (Godot best practice — never write RigidBody3D state directly).
 func reset_ball() -> void:
 	if _ball == null:
 		return
-	_ball.linear_velocity = Vector3.ZERO
-	_ball.angular_velocity = Vector3.ZERO
-	_ball.global_position = spawn_position
+	_ball.teleport_to(spawn_position)
+	_ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
 	print("[launcher] reset to %s" % spawn_position)
 
 
-## Primitive launch: apply linear + angular velocity at the ball's
-## CURRENT position. Use `reset_ball()` separately if you want to
-## also reposition. Resets the knuckle noise clock so the shot
-## replays deterministically from its own t = 0.
+## Primitive launch: stage linear + angular velocity for the next
+## physics step. Ball stays at its current position. Resets the
+## knuckle noise clock so the shot replays deterministically.
 func launch(velocity: Vector3, spin: Vector3 = Vector3.ZERO) -> void:
 	if _ball == null:
 		return
-	_ball.linear_velocity = velocity
-	_ball.angular_velocity = spin
+	_ball.apply_launch_state(velocity, spin)
 	if _ball.has_method("reset_knuckle_clock"):
 		_ball.reset_knuckle_clock()
 	print("[launcher] launch from %s v=%s |v|=%.2f m/s spin=%s |w|=%.2f rad/s" % [

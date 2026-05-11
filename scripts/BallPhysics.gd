@@ -77,6 +77,15 @@ var _mesh_node: MeshInstance3D
 var _base_mesh_scale: Vector3 = Vector3.ONE
 var _squash_tween: Tween
 
+# Deferred state changes (applied inside `_integrate_forces`).
+# Godot best practice — see `godot-physics-3d` skill: never write
+# `linear_velocity` or `global_position` on a RigidBody3D from outside
+# the physics step. Callers stage their intent here; the integrator
+# commits it on the next physics tick via `state.transform` etc.
+var _pending_teleport: Variant = null
+var _pending_linear: Variant = null
+var _pending_angular: Variant = null
+
 
 func _ready() -> void:
 	if config == null:
@@ -86,8 +95,12 @@ func _ready() -> void:
 			return
 	custom_integrator = true
 	continuous_cd = true
-	contact_monitor = true
-	max_contacts_reported = 8
+	# We resolve collisions via a deterministic AABB check inside
+	# `_integrate_substep`, so we don't need Godot to report contacts.
+	# `contact_monitor = false` saves the per-frame CPU cost of
+	# collision reporting we'd just throw away.
+	contact_monitor = false
+	max_contacts_reported = 0
 	mass = config.ball_mass
 	gravity_scale = 0.0
 	_apply_debug_visual_scale()
@@ -218,12 +231,49 @@ func _apply_debug_visual_scale() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	_apply_pending_state(state)
 	var dt: float = state.step
 	var speed: float = state.linear_velocity.length()
 	_current_substeps = compute_substeps(speed)
 	var sub_dt: float = dt / float(_current_substeps)
 	for i in _current_substeps:
 		_integrate_substep(state, sub_dt)
+
+
+# Commit deferred-state requests (teleport / launch) into the physics
+# state. Called at the top of `_integrate_forces` so external systems
+# (BallLauncher, SandboxController, tests) can stage intent without
+# touching `RigidBody3D` properties directly.
+func _apply_pending_state(state: PhysicsDirectBodyState3D) -> void:
+	if _pending_teleport != null:
+		var t: Transform3D = state.transform
+		t.origin = _pending_teleport as Vector3
+		state.transform = t
+		_pending_teleport = null
+	if _pending_linear != null:
+		state.linear_velocity = _pending_linear as Vector3
+		_pending_linear = null
+	if _pending_angular != null:
+		state.angular_velocity = _pending_angular as Vector3
+		_pending_angular = null
+
+
+# ---- Public API for the launcher / tests --------------------------------
+
+## Stage a teleport. Position is applied at the start of the next
+## physics step inside the custom integrator.
+func teleport_to(pos: Vector3) -> void:
+	_pending_teleport = pos
+
+
+## Stage linear + angular velocity. Both are applied at the start of
+## the next physics step. Pass `null` for either argument to skip
+## that axis.
+func apply_launch_state(linear: Variant, angular: Variant = null) -> void:
+	if linear != null:
+		_pending_linear = linear
+	if angular != null:
+		_pending_angular = angular
 
 
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
