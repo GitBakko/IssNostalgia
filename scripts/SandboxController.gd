@@ -123,6 +123,14 @@ func _tick_auto_launch() -> void:
 			_launcher.launch_horizontal()
 		"reset":
 			_launcher.reset_ball()
+		"curve":
+			_launcher.launch_curve_shot()
+		"deadleaf":
+			_launcher.launch_dead_leaf()
+		"grounder":
+			_launcher.launch_grounder_topspin()
+		"knuckle":
+			_launcher.launch_knuckle()
 		_:
 			push_warning("Unknown --auto-launch kind: %s" % _auto_launch_kind)
 
@@ -176,6 +184,14 @@ func _handle_key(event: InputEventKey) -> void:
 			if _launcher: _launcher.launch_horizontal()
 		KEY_R:
 			if _launcher: _launcher.reset_ball()
+		KEY_1:
+			if _launcher: _launcher.launch_curve_shot()
+		KEY_2:
+			if _launcher: _launcher.launch_dead_leaf()
+		KEY_3:
+			if _launcher: _launcher.launch_grounder_topspin()
+		KEY_4:
+			if _launcher: _launcher.launch_knuckle()
 
 
 func _handle_mouse(event: InputEventMouseButton) -> void:

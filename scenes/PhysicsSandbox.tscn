@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" path="res://scenes/Field.tscn" id="2_field"]
 [ext_resource type="PackedScene" path="res://scenes/Ball.tscn" id="3_ball"]
 [ext_resource type="PackedScene" path="res://scenes/BallLauncher.tscn" id="4_launcher"]
+[ext_resource type="PackedScene" path="res://scenes/TrajectoryVisualizer.tscn" id="5_traj"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -25,11 +26,14 @@ script = ExtResource("1_controller")
 [node name="Field" parent="." instance=ExtResource("2_field")]
 
 [node name="Ball" parent="." instance=ExtResource("3_ball")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
 initial_velocity = Vector3(0, 0, 0)
 initial_angular_velocity = Vector3(0, 0, 0)
 
 [node name="BallLauncher" parent="." instance=ExtResource("4_launcher")]
+
+[node name="TrajectoryVisualizer" parent="." instance=ExtResource("5_traj")]
+ball_path = NodePath("../Ball")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 
@@ -37,16 +41,20 @@ initial_angular_velocity = Vector3(0, 0, 0)
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 700.0
-offset_bottom = 220.0
+offset_bottom = 320.0
 theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
-text = "IssNostalgia — Physics Sandbox  (Sprint 01)
-SPACE   vertical launch  (15 m/s, light spin)
-H       horizontal launch  (+X, 20 m/s, topspin)
-LMB     click ground to lob the ball there
-R       reset to spawn (0, 1.5, 0)
+text = "IssNostalgia — Physics Sandbox  (Sprint 02)
+SPACE   vertical          (15 m/s, light spin)
+H       horizontal +X     (20 m/s, topspin)
+1       Tiro a giro       (25 m/s @15°, sidespin 8, topspin 2)
+2       Foglia morta      (22 m/s @20°, backspin 6, sidespin 3)
+3       Rasoterra forte   (30 m/s @1°,  topspin 4)
+4       Knuckleball       (28 m/s @10°, ~zero spin)
+LMB     lob to ground point
+R       reset to spawn (ground)
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD"]

@@ -99,6 +99,8 @@ func test_restitution_decay() -> void:
 	# heights between bounces must follow h_n = h_0 · e^(2n) within 3 %.
 	cfg.drag_coeff = 0.0
 	cfg.friction = 0.0
+	cfg.grass_roughness_enabled = false
+	cfg.rolling_friction_coeff = 0.0
 	var h0: float = 5.0
 	var e: float = cfg.restitution_base
 	var p: Vector3 = Vector3(0.0, h0, 0.0)
@@ -142,6 +144,7 @@ func test_no_tunneling() -> void:
 	# v · sub_dt = 50 · (1/480) ≈ 0.104 m, comparable to ball_radius
 	# (0.11 m). The integrator + resolver must still guarantee that the
 	# ball center stays above the ground plane plus ball_radius.
+	cfg.grass_roughness_enabled = false  # avoid noise injection
 	var p: Vector3 = Vector3(0.0, 1.0, 0.0)
 	var v: Vector3 = Vector3(0.0, -50.0, 0.0)
 	var dt: float = SUBSTEP_DT

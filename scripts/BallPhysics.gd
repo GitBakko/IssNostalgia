@@ -66,6 +66,11 @@ signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
 @export var debug_visual_scale: float = 1.0
 
 var _current_substeps: int = SUBSTEPS_LOW
+var _sim_time: float = 0.0
+var _knuckle_noise_a: FastNoiseLite
+var _knuckle_noise_b: FastNoiseLite
+var _grass_noise: FastNoiseLite
+var _last_grass_sample: float = 0.0
 
 
 func _ready() -> void:
@@ -81,10 +86,37 @@ func _ready() -> void:
 	mass = config.ball_mass
 	gravity_scale = 0.0
 	_apply_debug_visual_scale()
+	_init_knuckle_noise()
+	_init_grass_noise()
 	if initial_velocity != Vector3.ZERO:
 		linear_velocity = initial_velocity
 	if initial_angular_velocity != Vector3.ZERO:
 		angular_velocity = initial_angular_velocity
+
+
+func _init_knuckle_noise() -> void:
+	_knuckle_noise_a = FastNoiseLite.new()
+	_knuckle_noise_a.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_knuckle_noise_a.seed = config.knuckle_seed
+	_knuckle_noise_a.frequency = config.knuckle_noise_frequency
+	_knuckle_noise_b = FastNoiseLite.new()
+	_knuckle_noise_b.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_knuckle_noise_b.seed = config.knuckle_seed + 1
+	_knuckle_noise_b.frequency = config.knuckle_noise_frequency
+
+
+func _init_grass_noise() -> void:
+	_grass_noise = FastNoiseLite.new()
+	_grass_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_grass_noise.seed = config.knuckle_seed + 100   ## decoupled stream
+	_grass_noise.frequency = config.grass_roughness_frequency
+
+
+## Resets the knuckle noise streams to a known starting time. Useful for
+## the launcher (every shot replays from t=0 of its own noise channel)
+## and for unit tests.
+func reset_knuckle_clock() -> void:
+	_sim_time = 0.0
 
 
 func _apply_debug_visual_scale() -> void:
@@ -106,11 +138,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
+	_sim_time += sub_dt
 	var v: Vector3 = state.linear_velocity
 	var p: Vector3 = state.transform.origin
-	var step: Dictionary = integrate_step_pure(p, v, sub_dt)
+	var omega: Vector3 = state.angular_velocity
+	var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega)
 	p = step.position
 	v = step.velocity
+
+	# Knuckleball perturbation. Time-dependent (Simplex noise), so it
+	# lives outside `compute_force` and gets applied as a velocity delta.
+	if config.knuckle_enabled:
+		v += knuckle_acceleration(state.linear_velocity, omega, _sim_time) * sub_dt
 
 	# Resolve static-world collision (ground + perimeter walls).
 	var collision: Dictionary = resolve_static_collisions(p, v)
@@ -122,6 +161,8 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 
 	# Rolling resistance (continuous, ground-contact only).
 	v = apply_rolling_resistance(p, v, sub_dt)
+	# Grass micro-bumps (position-driven, fires on rising threshold).
+	v = apply_grass_roughness(p, v, sub_dt)
 
 	state.linear_velocity = v
 	var t: Transform3D = state.transform
@@ -133,7 +174,6 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	# must do it ourselves. Sprint 3 (Cross-2002) will start *modifying*
 	# angular_velocity at bounces; for now we just integrate the kinematic
 	# rotation so the mesh visibly spins.
-	var omega: Vector3 = state.angular_velocity
 	if omega.length_squared() > 1e-12:
 		var axis: Vector3 = omega.normalized()
 		var angle: float = omega.length() * sub_dt
@@ -165,6 +205,10 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_normal = Vector3.UP
 		p.y = GROUND_Y + r
 		v = _resolve_contact(v, Vector3.UP, vn)
+		# Grass jitter on hard ground bounces — real turf has tufts and
+		# undulations, so the outgoing vector is never perfectly clean.
+		if vn >= BOUNCE_SIGNAL_MIN_SPEED:
+			v = _grass_perturb_bounce(p, v, vn)
 		collided = true
 
 	# East wall (x = +WALL_MAX_X, normal = -X)
@@ -237,14 +281,24 @@ func _resolve_contact(v: Vector3, normal: Vector3, impact_speed: float) -> Vecto
 ## Reflect a velocity across a plane with `normal` (unit, pointing AWAY
 ## from the surface). Normal component is multiplied by `-e`, tangential
 ## component is dampened by `(1 - mu)`.
-## Sprint 1 uses constant `restitution_base` and `friction`. Sprint 3 will
-## swap these for the Cross-2002 model with velocity-dependent restitution
-## and explicit spin transfer.
+##
+## **Angle-aware restitution** (S02-A10): for a grazing impact
+## (`|v_n| / |v|` small — typical of a rasoterra) we apply a smoothstep
+## that drives the effective restitution to ~0, because in reality the
+## tiny normal component is almost entirely absorbed by the turf and
+## the ball keeps sliding/rolling instead of bouncing into the air.
+## A perpendicular impact keeps the full `restitution_base`. This is a
+## pre-emptive, simplified take on the angle dependence that Sprint 3's
+## Cross-2002 model will refine.
 func _bounce_velocity(v: Vector3, normal: Vector3) -> Vector3:
 	var v_n_scalar: float = v.dot(normal)
 	var v_normal: Vector3 = normal * v_n_scalar
 	var v_tangent: Vector3 = v - v_normal
-	var v_normal_new: Vector3 = -config.restitution_base * v_normal
+	var speed: float = v.length()
+	var sin_impact: float = 0.0 if speed < 1e-3 else absf(v_n_scalar) / speed
+	var angle_factor: float = smoothstep(0.05, 0.35, sin_impact)
+	var e_eff: float = config.restitution_base * angle_factor
+	var v_normal_new: Vector3 = -e_eff * v_normal
 	var v_tangent_new: Vector3 = v_tangent * (1.0 - config.friction)
 	return v_normal_new + v_tangent_new
 
@@ -277,11 +331,13 @@ func apply_rolling_resistance(p: Vector3, v: Vector3, sub_dt: float) -> Vector3:
 	return Vector3(v_t.x * scale, v.y, v_t.z * scale)
 
 
-## Pure-function integrator. Given a position/velocity, returns the next
-## position/velocity after `sub_dt` seconds. No side effects, no engine
-## state. Used by tests and by the forward predictor.
-func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float) -> Dictionary:
-	var f: Vector3 = compute_force(velocity)
+## Pure-function integrator. Given a position/velocity (+ optional spin),
+## returns the next position/velocity after `sub_dt` seconds. No side
+## effects, no engine state. Used by `_integrate_substep`, by the
+## forward predictor (Sprint 2 T05) and by the GUT tests.
+func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float,
+		omega: Vector3 = Vector3.ZERO) -> Dictionary:
+	var f: Vector3 = compute_force(velocity, omega)
 	var a: Vector3 = f / config.ball_mass
 	# semi-implicit Euler: velocity first, then position with the new velocity
 	var v_new: Vector3 = velocity + a * sub_dt
@@ -289,10 +345,143 @@ func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float) ->
 	return {"position": p_new, "velocity": v_new}
 
 
-## Sum of all active forces on the ball at the given velocity.
-## Sprint 1: gravity + drag. Sprint 2 will add Magnus + knuckle perturbation.
-func compute_force(velocity: Vector3) -> Vector3:
-	return _gravity_force() + _drag_force(velocity)
+## Sum of all active forces on the ball.
+## Sprint 1: gravity + drag.
+## Sprint 2: + Magnus when `config.magnus_enabled` (T01); knuckle
+## perturbation is applied separately inside `_integrate_substep`
+## because it needs simulation time (T02).
+func compute_force(velocity: Vector3, omega: Vector3 = Vector3.ZERO) -> Vector3:
+	var f: Vector3 = _gravity_force() + _drag_force(velocity)
+	if config.magnus_enabled:
+		f += _magnus_force(velocity, omega)
+	return f
+
+
+## Knuckleball acceleration (m/s²), perpendicular to the velocity.
+## Active only when `|ω| < knuckle_threshold_spin` AND `|v| > knuckle_threshold_speed`.
+##
+## Two-layer noise model so the trajectory feels unpredictable, matching
+## the textbook definition ("high-speed strike with little to no spin,
+## causing the ball to move unpredictably — wobble or dip — through the
+## air"):
+##   - **Smooth wobble**: two independent SIMPLEX streams (seeded with
+##     `knuckle_seed` and `knuckle_seed + 1`) at `knuckle_noise_frequency`.
+##   - **Snap layer**: the same streams sampled at a much higher rate
+##     (`knuckle_spike_frequency_mul ×` base freq) — wherever the
+##     high-rate noise exceeds `knuckle_spike_threshold` we add an
+##     additional impulse scaled by `knuckle_spike_amplitude_mul`. This
+##     produces the brief, hard-to-anticipate veers that knuckle
+##     specialists exploit in real life, without crossing into chaotic
+##     behaviour.
+## Result is deterministic for a given seed.
+func knuckle_acceleration(velocity: Vector3, omega: Vector3, time: float) -> Vector3:
+	if _knuckle_noise_a == null:
+		return Vector3.ZERO
+	var v_mag: float = velocity.length()
+	if v_mag < config.knuckle_threshold_speed:
+		return Vector3.ZERO
+	if omega.length() > config.knuckle_threshold_spin:
+		return Vector3.ZERO
+	var v_hat: Vector3 = velocity / v_mag
+	var lateral: Vector3 = v_hat.cross(Vector3.UP)
+	if lateral.length_squared() < 1e-6:
+		lateral = v_hat.cross(Vector3.RIGHT)
+	lateral = lateral.normalized()
+	var transverse: Vector3 = lateral.cross(v_hat).normalized()
+	# Smooth wobble (base layer)
+	var smooth_a: float = _knuckle_noise_a.get_noise_1d(time)
+	var smooth_b: float = _knuckle_noise_b.get_noise_1d(time)
+	# Snap layer — same streams sampled at a higher rate plus an offset
+	# so the two octaves don't lock-phase.
+	var t_fast: float = time * config.knuckle_spike_frequency_mul
+	var spike_a: float = _knuckle_noise_a.get_noise_1d(t_fast + 137.0)
+	var spike_b: float = _knuckle_noise_b.get_noise_1d(t_fast + 263.0)
+	var thr: float = config.knuckle_spike_threshold
+	var spike_mul: float = config.knuckle_spike_amplitude_mul
+	if absf(spike_a) > thr:
+		smooth_a += signf(spike_a) * (absf(spike_a) - thr) * spike_mul
+	if absf(spike_b) > thr:
+		smooth_b += signf(spike_b) * (absf(spike_b) - thr) * spike_mul
+	# Velocity-scale: real knuckle effect grows with |v|^2 (drag-driven).
+	# Use a soft factor so slow knuckle shots still get something.
+	var speed_factor: float = clampf((v_mag - config.knuckle_threshold_speed) / 12.0, 0.2, 1.4)
+	return config.knuckle_amplitude * speed_factor * (lateral * smooth_a + transverse * smooth_b)
+
+
+## Grass jitter on a hard ground bounce. Adds a positive vertical kick
+## (turf pushes the ball back up) plus a small lateral deflection,
+## both sampled deterministically from the position-noise stream so
+## the same patch of grass always behaves the same way. Magnitude
+## scales linearly with how hard the bounce was, capped at 8 m/s.
+func _grass_perturb_bounce(p: Vector3, v: Vector3, vn: float) -> Vector3:
+	if not config.grass_roughness_enabled or _grass_noise == null:
+		return v
+	var n_y: float = _grass_noise.get_noise_2d(p.x, p.z)
+	var n_x: float = _grass_noise.get_noise_2d(p.x + 73.5, p.z - 41.0)
+	var n_z: float = _grass_noise.get_noise_2d(p.x - 91.0, p.z + 17.0)
+	var speed_factor: float = clampf((vn - BOUNCE_SIGNAL_MIN_SPEED) / 8.0, 0.0, 1.0)
+	var kick: float = config.grass_roughness_kick * speed_factor
+	v.y += absf(n_y) * kick * 0.7   ## always upward (turf pushes up)
+	v.x += n_x * kick * 0.45
+	v.z += n_z * kick * 0.45
+	return v
+
+
+## Grass micro-bumps. When the ball is rolling on the ground at high
+## tangential speed, a position-sampled Simplex noise produces small
+## vertical kicks on rising-edge crossings of `grass_roughness_threshold`,
+## modelling tufts and natural undulations. Deterministic per position
+## (the same patch of grass always behaves the same way).
+##
+## Returns the velocity AFTER the kick has been applied (if any).
+func apply_grass_roughness(p: Vector3, v: Vector3, sub_dt: float) -> Vector3:
+	if not config.grass_roughness_enabled or _grass_noise == null:
+		return v
+	var r: float = config.ball_radius
+	if p.y > GROUND_Y + r + ROLLING_HEIGHT_TOL:
+		_last_grass_sample = 0.0
+		return v
+	if absf(v.y) > ROLLING_VY_TOL:
+		_last_grass_sample = 0.0
+		return v
+	var v_t: float = Vector3(v.x, 0.0, v.z).length()
+	if v_t < config.grass_roughness_min_speed:
+		_last_grass_sample = 0.0
+		return v
+	var sample: float = _grass_noise.get_noise_2d(p.x, p.z)
+	var thr: float = config.grass_roughness_threshold
+	var crossed: bool = _last_grass_sample < thr and sample >= thr
+	_last_grass_sample = sample
+	if crossed:
+		var speed_factor: float = clampf(
+			(v_t - config.grass_roughness_min_speed) / 20.0, 0.0, 1.0,
+		)
+		var kick: float = config.grass_roughness_kick * speed_factor * sample
+		v.y += kick
+	return v
+
+
+## Magnus lift force.
+##   F_M = 0.5 · ρ · A · Cl(S) · |v|² · (ω̂ × v̂)
+## with the saturating lift coefficient Cl(S) = S / (S + 0.5), spin
+## parameter S = r·|ω| / |v|, capped at `magnus_spin_param_cap`.
+##
+## The locked formula in SPRINT_02_PLAN (M02) reads `|v|` instead of
+## `|v|²` — a units check shows that produces kg/s, not Newton, so the
+## correct factor is `|v|²`. PHYSICS_LOG S02-A01 records the correction.
+func _magnus_force(velocity: Vector3, omega: Vector3) -> Vector3:
+	var v_mag: float = velocity.length()
+	if v_mag < config.magnus_min_speed:
+		return Vector3.ZERO
+	var w_mag: float = omega.length()
+	if w_mag < 1e-6:
+		return Vector3.ZERO
+	var s: float = (config.ball_radius * w_mag) / v_mag
+	s = min(s, config.magnus_spin_param_cap)
+	var cl: float = s / (s + 0.5)
+	var area: float = PI * config.ball_radius * config.ball_radius
+	var dir: Vector3 = (omega / w_mag).cross(velocity / v_mag)
+	return 0.5 * config.air_density * area * cl * v_mag * v_mag * dir
 
 
 func _gravity_force() -> Vector3:
@@ -318,6 +507,35 @@ static func compute_substeps(speed: float) -> int:
 
 func get_current_substeps() -> int:
 	return _current_substeps
+
+
+## Forward predictor (Sprint 2 T05). Simulates the ball forward from the
+## given state by `steps` substeps of `sub_dt` seconds each, applying the
+## same gravity + drag + Magnus + knuckle + ground + walls + rolling
+## resistance as the live integrator (M06 / M07). Returns the array of
+## positions sampled at every step. Pure: no engine state read or written.
+func predict_forward(p0: Vector3, v0: Vector3, omega0: Vector3,
+		time0: float, steps: int, sub_dt: float) -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	out.resize(steps)
+	var p: Vector3 = p0
+	var v: Vector3 = v0
+	var t: float = time0
+	for i in steps:
+		t += sub_dt
+		var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega0)
+		p = step.position
+		v = step.velocity
+		if config.knuckle_enabled:
+			v += knuckle_acceleration(v0, omega0, t) * sub_dt
+		var col: Dictionary = resolve_static_collisions(p, v)
+		if col.collided:
+			p = col.position
+			v = col.velocity
+		v = apply_rolling_resistance(p, v, sub_dt)
+		v = apply_grass_roughness(p, v, sub_dt)
+		out[i] = p
+	return out
 
 
 ## Convenience for tests / launcher: theoretical terminal velocity for a
