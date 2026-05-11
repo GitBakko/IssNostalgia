@@ -1,0 +1,6 @@
+[submodule "addons/imgui-godot"]
+	path = addons/imgui-godot
+	url = https://github.com/pkdawson/imgui-godot
+[submodule "addons/gut"]
+	path = addons/gut
+	url = https://github.com/bitwes/Gut
