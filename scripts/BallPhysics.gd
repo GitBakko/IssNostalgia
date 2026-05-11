@@ -66,6 +66,9 @@ signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
 @export var debug_visual_scale: float = 1.0
 
 var _current_substeps: int = SUBSTEPS_LOW
+var _sim_time: float = 0.0
+var _knuckle_noise_a: FastNoiseLite
+var _knuckle_noise_b: FastNoiseLite
 
 
 func _ready() -> void:
@@ -81,10 +84,29 @@ func _ready() -> void:
 	mass = config.ball_mass
 	gravity_scale = 0.0
 	_apply_debug_visual_scale()
+	_init_knuckle_noise()
 	if initial_velocity != Vector3.ZERO:
 		linear_velocity = initial_velocity
 	if initial_angular_velocity != Vector3.ZERO:
 		angular_velocity = initial_angular_velocity
+
+
+func _init_knuckle_noise() -> void:
+	_knuckle_noise_a = FastNoiseLite.new()
+	_knuckle_noise_a.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_knuckle_noise_a.seed = config.knuckle_seed
+	_knuckle_noise_a.frequency = config.knuckle_noise_frequency
+	_knuckle_noise_b = FastNoiseLite.new()
+	_knuckle_noise_b.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_knuckle_noise_b.seed = config.knuckle_seed + 1
+	_knuckle_noise_b.frequency = config.knuckle_noise_frequency
+
+
+## Resets the knuckle noise streams to a known starting time. Useful for
+## the launcher (every shot replays from t=0 of its own noise channel)
+## and for unit tests.
+func reset_knuckle_clock() -> void:
+	_sim_time = 0.0
 
 
 func _apply_debug_visual_scale() -> void:
@@ -106,12 +128,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
+	_sim_time += sub_dt
 	var v: Vector3 = state.linear_velocity
 	var p: Vector3 = state.transform.origin
 	var omega: Vector3 = state.angular_velocity
 	var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega)
 	p = step.position
 	v = step.velocity
+
+	# Knuckleball perturbation. Time-dependent (Simplex noise), so it
+	# lives outside `compute_force` and gets applied as a velocity delta.
+	if config.knuckle_enabled:
+		v += knuckle_acceleration(state.linear_velocity, omega, _sim_time) * sub_dt
 
 	# Resolve static-world collision (ground + perimeter walls).
 	var collision: Dictionary = resolve_static_collisions(p, v)
@@ -301,6 +329,31 @@ func compute_force(velocity: Vector3, omega: Vector3 = Vector3.ZERO) -> Vector3:
 	if config.magnus_enabled:
 		f += _magnus_force(velocity, omega)
 	return f
+
+
+## Knuckleball acceleration (m/s²), perpendicular to the velocity.
+## Active only when `|ω| < knuckle_threshold_spin` AND `|v| > knuckle_threshold_speed`.
+## Two independent Simplex streams (seeded with `config.knuckle_seed` and
+## `config.knuckle_seed + 1`) drive the two perpendicular axes. The result
+## is deterministic for a given seed — replays match bytewise.
+func knuckle_acceleration(velocity: Vector3, omega: Vector3, time: float) -> Vector3:
+	if _knuckle_noise_a == null:
+		return Vector3.ZERO
+	var v_mag: float = velocity.length()
+	if v_mag < config.knuckle_threshold_speed:
+		return Vector3.ZERO
+	if omega.length() > config.knuckle_threshold_spin:
+		return Vector3.ZERO
+	var v_hat: Vector3 = velocity / v_mag
+	var lateral: Vector3 = v_hat.cross(Vector3.UP)
+	if lateral.length_squared() < 1e-6:
+		# velocity nearly vertical — pick any horizontal reference
+		lateral = v_hat.cross(Vector3.RIGHT)
+	lateral = lateral.normalized()
+	var transverse: Vector3 = lateral.cross(v_hat).normalized()
+	var n_a: float = _knuckle_noise_a.get_noise_1d(time)
+	var n_b: float = _knuckle_noise_b.get_noise_1d(time)
+	return config.knuckle_amplitude * (lateral * n_a + transverse * n_b)
 
 
 ## Magnus lift force.

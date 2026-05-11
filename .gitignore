@@ -60,6 +60,7 @@ screenshots/
 # Stray ephemera that PowerShell redirections can leave behind
 1e-*
 target
+void
 
 # Backups (runtime-generated, not source)
 resources/backups/*.tres

@@ -47,7 +47,23 @@ extends Resource
 
 # ---- Knuckleball (activated in Sprint 2) ---------------------------------
 @export_group("Knuckleball")
-@export var knuckle_enabled: bool = false
-@export var knuckle_threshold_spin: float = 2.0   ## rad/s
-@export var knuckle_threshold_speed: float = 15.0 ## m/s
-@export var knuckle_amplitude: float = 0.3
+@export var knuckle_enabled: bool = true              ## flipped on Sprint 2
+@export var knuckle_threshold_spin: float = 2.0       ## rad/s — gate, only when
+                                                      ## |ω| below this
+@export var knuckle_threshold_speed: float = 15.0     ## m/s — gate, only when
+                                                      ## |v| above this
+@export var knuckle_amplitude: float = 5.0            ## m/s² — peak transverse
+                                                      ## acceleration (Asai et al.
+                                                      ## measured ~10 N at 30 m/s
+                                                      ## → ~23 m/s² on 0.43 kg;
+                                                      ## 5 m/s² is a calibrated
+                                                      ## DRAFT for arcade feel)
+@export var knuckle_seed: int = 1337                  ## Simplex seed — replays
+                                                      ## with the same seed must
+                                                      ## produce bytewise-identical
+                                                      ## perturbation
+@export var knuckle_noise_frequency: float = 1.0      ## sample rate of the
+                                                      ## underlying Simplex
+                                                      ## (peaks per simulated
+                                                      ## second, ≈ effective
+                                                      ## oscillation freq)
