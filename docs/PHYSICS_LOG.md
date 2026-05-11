@@ -59,6 +59,20 @@ Validated: Sprint 2, macro shot "Tiro a giro", session 3.
 | S01-A03 | `BoxShape3D` flat (200 × 0.1 × 120) for ground | `WorldBoundaryShape3D` inconsistent with CCD at high velocity |
 | S01-A04 | `Cl(S) = S / (S + 0.5)`, cap `S ≤ 1.5` | Saturation is physically correct (Asai, Carré). Cap allows extreme spin calibration without numerical blow-up |
 | S01-A05 | Substep count published in debug overlay | Allows live correlation between velocity regime and integrator precision |
+| S01-A06 | Camera placement via `look_at()` in script | `Transform3D` rows in `.tscn` are fragile to hand-compute. Script `look_at()` derives the basis from `camera_position`, `camera_target`, `Vector3.UP`. Position `(0, 35, 20)` and FOV 45° are the plan defaults; both are `@export` and tunable. Final values to be locked after visual validation in T05 |
+| S01-A07 | Field texture is an SVG (`field_lines.svg`) rasterised at import | Vector source is editable, tiny in git, sharper than a hand-painted PNG, and respects the "no extra draw call for lines" rule (I.1). Width/height attributes set to 2100×1360 so Godot's SVG importer produces a high-resolution `Texture2D` at default scale |
+| S01-A08 | Goalposts are visual-only `MeshInstance3D` (no collision) in T01 | Collision will be added in T03 together with the ground `StaticBody3D`. Posts are 0.12×2.44×0.12 m (vertical), crossbar 0.12×0.12×7.32 m; positioned at `x = ±52.5`, `z = ±3.66` (posts), `y = 2.44` (crossbar). FIFA Law 1 dimensions |
+| S01-A09 | Integrator exposed as a pure function `integrate_step_pure(p, v, sub_dt)` | The same function is reused by `_integrate_substep` (live), by the Sprint 2 forward predictor, and by the Sprint 1 GUT tests. One physics implementation, three call-sites — DRY guarantees that what the tests lock is exactly what the predictor predicts and what the game runs |
+| S01-A10 | `RigidBody3D.gravity_scale = 0.0` on the ball, gravity applied inside `compute_force` | We own all forces. Letting Godot apply its built-in gravity in parallel would double-count it. The scene-level `[physics] 3d/default_gravity` is kept at 9.81 for other potential bodies, but the ball ignores it |
+| S01-A11 | `debug_visual_scale` on `BallPhysics`, **default 1.0** (real scale) | The mechanism exists for future debug needs but the sandbox runs at real scale. Trade-off accepted by the user: at the current camera (0, 20, 40) the FIFA 0.11 m ball renders at ~7 px and the spin texture is barely readable, but the visual relationship between ball and 105×68 m pitch markings is correct. Scale 2.0 / 4.0 were tried and rejected as out of proportion. Spin readability will be restored by the Sprint 2 trajectory ribbon and the eventual near-camera follow |
+| S01-A12 | Angular kinematic update inside `_integrate_substep` | With `custom_integrator = true` Godot does not rotate the transform from `angular_velocity`. The substep therefore applies `Basis(omega.normalized(), |omega| * sub_dt) * t.basis`. Sprint 1 never **modifies** angular_velocity (no torques); Sprint 3 will, via Cross-2002 spin transfer at bounce |
+| S01-A13 | Soccer ball SVG texture (`ball_pentagons.svg`) at 1024×512, equirectangular | 12 dark "pentagons" placed at icosahedron vertices (2 polar caps + 5 upper ring at lat +26.5° + 5 lower ring at lat −26.5°), ellipses sized to compensate for equirectangular horizontal stretch. Faint meridians + equator added for spin readability around any axis |
+| S01-A14 | Static-world collision via custom geometric check, **no `StaticBody3D` for ground / walls** | The world is axis-aligned: ground = `y = 0` plane, perimeter walls = AABB `[±57.5] × [±39]`. Resolving collisions analytically inside the substep loop is deterministic, free of penetration recovery quirks, and avoids any ambiguity over whether Godot still applies position correction when `custom_integrator = true`. Sprint 5 will reconsider when arbitrary obstacles appear. The `resolve_static_collisions(p, v)` function is pure and reused by tests / predictor (DRY with S01-A09) |
+| S01-A15 | `bounced` signal with a 0.8 m/s impact-speed gate | The integrator emits one signal per bounce, used by `SandboxController` for live logging and reserved for Sprint 3 audio. Below 0.8 m/s the contact reads as rolling / resting, not as a percussive bounce, so signals are suppressed to avoid spam at the end of a settle |
+| S01-A16 | GUT addon **vendored, not submoduled** (`addons/gut/UPSTREAM.md`) | The bitwes/Gut upstream repo nests the addon at `addons/gut/`. Submoduling it to our `addons/gut/` produced a double `addons/gut/addons/gut/` path that broke Godot's plugin and `class_name` resolution. Vendoring as a flat copy pinned to tag v9.6.0 fixes the issue; `UPSTREAM.md` documents the update recipe. The same problem exists for `addons/imgui-godot/`; it will be flattened in Sprint 4 when imgui is actually consumed |
+| S01-A17 | Tests instantiate `BallPhysics.new()` + `add_child(ball)` in `before_each` | Pure-function `integrate_step_pure` and `resolve_static_collisions` are instance methods (they read `config`). Putting the body in the tree lets `_ready` run with the test-mutated `cfg`, and the engine still skips physics ticks on it because we never simulate at the engine level — every test drives the pure functions in a tight loop. GUT reports a "5 unfreed children" warning because `queue_free` is deferred; the leak is bounded to the test lifetime and acceptable |
+| S01-A18 | T04 numerical lock validated (`tests/unit/test_ball_physics.gd`) | 4/4 pass. Terminal velocity 19.633 m/s simulated vs 19.634 m/s closed-form (rel.err 0.0000). Restitution peaks at e=0.6 from h0=5 m: 1.86 / 0.74 / 0.33 m vs theoretical 1.80 / 0.65 / 0.23 m — within the 3 %·h0 (=0.15 m) tolerance; the small positive bias is the expected semi-implicit Euler energy drift at sharp impulsive contacts. No-tunneling: min observed y at 50 m/s downward launch is exactly 0.11000 m = ball_radius |
+| S01-A19 | Separated impact friction (`friction`, slip-loss at hard bounces) from continuous rolling resistance (`rolling_friction_coeff`) | First T05 test of the H key produced a brutal horizontal slow-down: every substep that registered a ground contact (~480 Hz) multiplied the tangent by `(1 - friction) = 0.7`, compounding to near-instant stop. Fix: `_resolve_contact` applies tangent dampening only when `\|v_n\| >= BOUNCE_SIGNAL_MIN_SPEED` (real bounces). Soft / rolling contacts only cancel the normal component, and a separate `apply_rolling_resistance` step decelerates the tangent by `μ_r·g` per second when the ball is in ground contact at near-zero `\|v_y\|`. With `rolling_friction_coeff = 0.3` (DRAFT, natural grass) the H-key launch (20 m/s) covers ~35 m before resting, which is in the ballpark of a real strong-roll kick |
 
 ### Magnus Formula (planned, Sprint 2)
 
@@ -97,7 +111,25 @@ _(to be populated during implementation)_
 
 ### Sprint 01 Calibration Sessions
 
-_(to be populated per session — date, focus, before / after values, observations)_
+| Date       | Task   | Focus                                  | Notes |
+|------------|--------|----------------------------------------|-------|
+| 2026-05-11 | T01    | Field + camera ISS-broadcast view      | Camera at (0, 20, 40), FOV 45° validated visually. Pitch ~27° |
+| 2026-05-11 | T02    | Custom integrator + drag               | Gravity + drag traces match closed-form within drag bias |
+| 2026-05-11 | T02.1  | Pentagons texture + visual scale       | `debug_visual_scale = 1.0` (real). Spin readability deferred to predictor |
+| 2026-05-11 | T03    | Ground + walls bounce                  | 5 bounces from y=8, e_effective ~0.59 vs target 0.60 (drag loss) |
+| 2026-05-11 | T04    | GUT 4/4 PASS                           | Terminal v 19.633 vs 19.634; no tunneling at 50 m/s |
+| 2026-05-11 | T05    | Launcher + HUD                         | SPACE / H / R / LMB key map + on-screen telemetry. Ball spawn moved to (0, 1.5, 0) — quick reset cadence |
+| 2026-05-11 | T05.1  | Rolling resistance separated           | `friction` (impact) vs `rolling_friction_coeff` (continuous). H-key launch now rolls ~35 m. GUT 4/4 still PASS |
+| 2026-05-11 | T06    | Sprint 01 closeout, merge to main      | All Exit Criteria validated. Tag `v0.1.0-sprint01` |
+
+### Sprint 01 Exit Criteria
+
+| # | Criterion                                                                | Status   | Evidence |
+|---|--------------------------------------------------------------------------|----------|----------|
+| 1 | Vertical-launched ball bounces with correct decay                        | DONE     | T03 bounce log: 8.36 → 4.88 → 2.88 → 1.71 → 1.02 m/s, ratio ≈ 0.59 (target e = 0.6, drag loss ≈ 3%) |
+| 2 | Horizontal-launched ball decelerates visibly from drag                   | DONE     | T05 HUD speedometer + T04 terminal-velocity test (19.633 ≈ 19.634 m/s closed-form, rel.err 0.0000) |
+| 3 | Spin visible on ball axis                                                | DONE     | Pentagons SVG texture + angular kinematic update in custom integrator (S01-A12/A13) |
+| 4 | FPS stable ≥ 60 in editor                                                | DONE     | User confirmed in editor: FPS ≥ 60 across drop, vertical / horizontal launches, ground-click lob, reset cycle |
 
 ---
 

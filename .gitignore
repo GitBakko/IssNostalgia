@@ -1,10 +1,11 @@
 # Godot 4 — official template
 .godot/
 .import/
-*.import
 export.cfg
 export_presets.cfg
 *.translation
+# Note: keep `*.import` sidecar files committed alongside their source assets.
+# Godot best practice — they record reproducible import settings.
 
 # Godot .NET / Mono
 .mono/
@@ -51,6 +52,15 @@ dist/
 *.log
 tests/last_run.log
 
+# Local screenshots (validation artifacts, not source)
+t*_screenshot.png
+t*_screenshot.png.import
+screenshots/
+
+# Stray ephemera that PowerShell redirections can leave behind
+1e-*
+target
+
 # Backups (runtime-generated, not source)
 resources/backups/*.tres
 !resources/backups/.gdkeep
@@ -65,3 +75,6 @@ resources/backups/*.tres
 .claude-flow/
 .planning/
 .code-review-graph/
+.swarm/
+ruvector.db
+ruvector.db-journal

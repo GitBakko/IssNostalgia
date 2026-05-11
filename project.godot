@@ -14,7 +14,7 @@ config/name="IssNostalgia"
 config/description="Mobile football game inspired by ISS Pro Evolution 2."
 config/version="0.1.0"
 run/main_scene="res://scenes/PhysicsSandbox.tscn"
-config/features=PackedStringArray("4.6", "C#", "Mobile")
+config/features=PackedStringArray("4.6", "Mobile")
 config/icon="res://icon.svg"
 
 [display]
@@ -32,9 +32,7 @@ project/assembly_name="IssNostalgia"
 [physics]
 
 common/physics_ticks_per_second=120
-common/max_physics_steps_per_frame=8
 3d/default_gravity=9.81
-3d/default_gravity_vector=Vector3(0, -1, 0)
 
 [rendering]
 
