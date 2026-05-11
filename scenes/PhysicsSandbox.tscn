@@ -1,0 +1,39 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/SandboxController.gd" id="1_controller"]
+[ext_resource type="PackedScene" path="res://scenes/Field.tscn" id="2_field"]
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 1
+background_color = Color(0.55, 0.72, 0.88, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.55, 0.72, 0.88, 1)
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 0.4
+tonemap_mode = 2
+tonemap_exposure = 1.0
+glow_enabled = false
+
+[sub_resource type="CameraAttributesPractical" id="CameraAttributes_main"]
+exposure_multiplier = 1.0
+
+[node name="PhysicsSandbox" type="Node3D"]
+script = ExtResource("1_controller")
+
+[node name="Field" parent="." instance=ExtResource("2_field")]
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 35, 20)
+fov = 45.0
+near = 0.5
+far = 500.0
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 50, 0)
+light_energy = 1.1
+light_color = Color(1, 0.97, 0.9, 1)
+shadow_enabled = false
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+camera_attributes = SubResource("CameraAttributes_main")

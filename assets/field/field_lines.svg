@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="2100" height="1360"
+     viewBox="0 0 105 68"
+     preserveAspectRatio="none">
+  <!-- Grass background -->
+  <rect width="105" height="68" fill="#2f7a2f"/>
+
+  <!-- Subtle stripes for visual depth -->
+  <g opacity="0.08" fill="#000000">
+    <rect x="0"  y="0" width="10.5" height="68"/>
+    <rect x="21" y="0" width="10.5" height="68"/>
+    <rect x="42" y="0" width="10.5" height="68"/>
+    <rect x="63" y="0" width="10.5" height="68"/>
+    <rect x="84" y="0" width="10.5" height="68"/>
+  </g>
+
+  <g fill="none" stroke="#ffffff" stroke-width="0.15">
+    <!-- Outer field outline -->
+    <rect x="0" y="0" width="105" height="68"/>
+
+    <!-- Halfway line -->
+    <line x1="52.5" y1="0" x2="52.5" y2="68"/>
+
+    <!-- Center circle (r = 9.15 m) -->
+    <circle cx="52.5" cy="34" r="9.15"/>
+
+    <!-- Left penalty area (16.5 deep x 40.32 wide) -->
+    <rect x="0" y="13.84" width="16.5" height="40.32"/>
+    <!-- Left goal area (5.5 deep x 18.32 wide) -->
+    <rect x="0" y="24.84" width="5.5"  height="18.32"/>
+    <!-- Left penalty arc, only the part outside the penalty area -->
+    <path d="M 16.5 26.69 A 9.15 9.15 0 0 1 16.5 41.31"/>
+
+    <!-- Right penalty area -->
+    <rect x="88.5" y="13.84" width="16.5" height="40.32"/>
+    <!-- Right goal area -->
+    <rect x="99.5" y="24.84" width="5.5" height="18.32"/>
+    <!-- Right penalty arc -->
+    <path d="M 88.5 26.69 A 9.15 9.15 0 0 0 88.5 41.31"/>
+
+    <!-- Corner arcs (r = 1 m) -->
+    <path d="M 0 1   A 1 1 0 0 0 1   0"/>
+    <path d="M 104 0 A 1 1 0 0 0 105 1"/>
+    <path d="M 0 67  A 1 1 0 0 1 1  68"/>
+    <path d="M 104 68 A 1 1 0 0 1 105 67"/>
+  </g>
+
+  <!-- Center spot, penalty spots -->
+  <g fill="#ffffff">
+    <circle cx="52.5" cy="34" r="0.3"/>
+    <circle cx="11"   cy="34" r="0.3"/>
+    <circle cx="94"   cy="34" r="0.3"/>
+  </g>
+</svg>

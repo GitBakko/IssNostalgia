@@ -1,0 +1,75 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Texture2D" path="res://assets/field/field_lines.svg" id="1_field_tex"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_texture = ExtResource("1_field_tex")
+texture_filter = 3
+roughness = 0.95
+metallic = 0.0
+metallic_specular = 0.1
+uv1_triplanar = false
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+material = SubResource("StandardMaterial3D_ground")
+size = Vector2(105, 68)
+subdivide_width = 1
+subdivide_depth = 1
+orientation = 1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_goalpost"]
+albedo_color = Color(0.95, 0.95, 0.95, 1)
+roughness = 0.6
+metallic = 0.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_post"]
+material = SubResource("StandardMaterial3D_goalpost")
+size = Vector3(0.12, 2.44, 0.12)
+
+[sub_resource type="BoxMesh" id="BoxMesh_crossbar"]
+material = SubResource("StandardMaterial3D_goalpost")
+size = Vector3(0.12, 0.12, 7.32)
+
+[sub_resource type="BoxMesh" id="BoxMesh_post_east"]
+material = SubResource("StandardMaterial3D_goalpost")
+size = Vector3(0.12, 2.44, 0.12)
+
+[sub_resource type="BoxMesh" id="BoxMesh_crossbar_east"]
+material = SubResource("StandardMaterial3D_goalpost")
+size = Vector3(0.12, 0.12, 7.32)
+
+[node name="Field" type="Node3D"]
+
+[node name="GroundMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="GoalWest" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -52.5, 0, 0)
+
+[node name="PostNorth" type="MeshInstance3D" parent="GoalWest"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.22, -3.66)
+mesh = SubResource("BoxMesh_post")
+
+[node name="PostSouth" type="MeshInstance3D" parent="GoalWest"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.22, 3.66)
+mesh = SubResource("BoxMesh_post")
+
+[node name="Crossbar" type="MeshInstance3D" parent="GoalWest"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.44, 0)
+mesh = SubResource("BoxMesh_crossbar")
+
+[node name="GoalEast" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 52.5, 0, 0)
+
+[node name="PostNorth" type="MeshInstance3D" parent="GoalEast"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.22, -3.66)
+mesh = SubResource("BoxMesh_post_east")
+
+[node name="PostSouth" type="MeshInstance3D" parent="GoalEast"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.22, 3.66)
+mesh = SubResource("BoxMesh_post_east")
+
+[node name="Crossbar" type="MeshInstance3D" parent="GoalEast"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.44, 0)
+mesh = SubResource("BoxMesh_crossbar_east")
