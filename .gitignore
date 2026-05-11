@@ -66,6 +66,8 @@ void
 Color
 Vector*
 PackedVector*
+this
+This
 
 # Backups (runtime-generated, not source)
 resources/backups/*.tres
