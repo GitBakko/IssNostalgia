@@ -122,6 +122,19 @@ _(to be populated during implementation)_
 | 2026-05-11 | T05.1  | Rolling resistance separated           | `friction` (impact) vs `rolling_friction_coeff` (continuous). H-key launch now rolls ~35 m. GUT 4/4 still PASS |
 | 2026-05-11 | T06    | Sprint 01 closeout, merge to main      | All Exit Criteria validated. Tag `v0.1.0-sprint01` |
 
+### Sprint 02 Pending Items (deferred to post-Sprint 04)
+
+Both items are **[PENDING — needs directional input for validation]**.
+Real validation requires a per-shot direction control (the launcher's
+fixed `Vector3.RIGHT` macros are not flexible enough to construct the
+test scenarios). Sprint 04's debug UI will expose direction + spin
+sliders; the items are scheduled to be re-evaluated then.
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Knuckle wobble realism | [PENDING] | After S02-A09 the trajectory is still "too predictable" per user feedback. Suspected fixes: stronger spike events (higher `knuckle_spike_amplitude_mul` or lower threshold), drag-crisis simulation (sudden drop in Cd at v ≈ 30 m/s producing the trademark dip), or replace SIMPLEX with a Perlin-Brownian combination |
+| Low-power rasoterra bounce | [PENDING] | The strong-power rasoterra (30 m/s @ 1°) now stays inside 0-2.7 cm; a softer shot (≤15 m/s) has not been tested. Bounce physics needs visual verification at low impact speeds, possibly with surface-specific calibration coming in Sprint 03 |
+
 ### Sprint 01 Exit Criteria
 
 | # | Criterion                                                                | Status   | Evidence |
