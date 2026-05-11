@@ -50,15 +50,75 @@ func reset_ball() -> void:
 
 
 ## Primitive launch: teleport ball to spawn, apply linear+angular velocity.
+## Resets the ball's knuckle noise clock so replays from the same shot
+## are deterministic.
 func launch(velocity: Vector3, spin: Vector3 = Vector3.ZERO) -> void:
 	if _ball == null:
 		return
 	_ball.global_position = spawn_position
 	_ball.linear_velocity = velocity
 	_ball.angular_velocity = spin
+	if _ball.has_method("reset_knuckle_clock"):
+		_ball.reset_knuckle_clock()
 	print("[launcher] launch v=%s |v|=%.2f m/s spin=%s |w|=%.2f rad/s" % [
 		velocity, velocity.length(), spin, spin.length(),
 	])
+
+
+## Decompose a per-axis spin specification (topspin, sidespin, rifling)
+## around the launch direction into a world-space ω vector.
+##   topspin >0  → rotation around (direction × UP), i.e. ball rolls
+##                  forward in flight; <0 = backspin
+##   sidespin >0 → rotation around world UP, curves the ball to the
+##                  left of its direction of motion (for +X dir → -Z)
+##   rifling >0  → rotation around the direction of motion itself
+static func compose_spin(direction: Vector3, topspin: float,
+		sidespin: float, rifling: float = 0.0) -> Vector3:
+	var dir: Vector3 = direction.normalized()
+	var top_axis: Vector3 = dir.cross(Vector3.UP)
+	if top_axis.length_squared() < 1e-6:
+		top_axis = Vector3.BACK   # fallback when dir is vertical
+	top_axis = top_axis.normalized()
+	return top_axis * topspin + Vector3.UP * sidespin + dir * rifling
+
+
+## Launch at a given elevation angle (degrees) above the horizontal,
+## with a world-space spin vector. Used by every macro shot below.
+func launch_at_angle(direction: Vector3, speed: float,
+		elevation_deg: float, spin: Vector3 = Vector3.ZERO) -> void:
+	var dir: Vector3 = direction.normalized()
+	var rad: float = deg_to_rad(elevation_deg)
+	var v: Vector3 = dir * (speed * cos(rad)) + Vector3.UP * (speed * sin(rad))
+	launch(v, spin)
+
+
+# ---- Macro shots (Sprint 2 calibration targets, round-2 7.3) -------------
+
+## Tiro a giro: 25 m/s @ 15°, sidespin 8 rad/s, light topspin 2 rad/s.
+## Target: ~3-4 m of lateral curve over 20 m of flight.
+func launch_curve_shot() -> void:
+	var spin: Vector3 = compose_spin(Vector3.RIGHT, 2.0, 8.0, 0.0)
+	launch_at_angle(Vector3.RIGHT, 25.0, 15.0, spin)
+
+
+## Foglia morta: 22 m/s @ 20°, backspin 6 rad/s, mild sidespin 3 rad/s.
+## Target: trajectory that drops sharply in the last 5 m.
+func launch_dead_leaf() -> void:
+	var spin: Vector3 = compose_spin(Vector3.RIGHT, -6.0, 3.0, 0.0)
+	launch_at_angle(Vector3.RIGHT, 22.0, 20.0, spin)
+
+
+## Rasoterra forte: 30 m/s @ 3° low arc, topspin 4 rad/s.
+## Target: low bounce that "accelerates forward" on topspin contact.
+func launch_grounder_topspin() -> void:
+	var spin: Vector3 = compose_spin(Vector3.RIGHT, 4.0, 0.0, 0.0)
+	launch_at_angle(Vector3.RIGHT, 30.0, 3.0, spin)
+
+
+## Knuckleball: 28 m/s @ 10°, near-zero spin so the Simplex noise
+## stream dominates the trajectory.
+func launch_knuckle() -> void:
+	launch_at_angle(Vector3.RIGHT, 28.0, 10.0, Vector3.ZERO)
 
 
 func launch_vertical(speed: float = -1.0, spin_z: float = INF) -> void:

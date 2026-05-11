@@ -37,16 +37,20 @@ initial_angular_velocity = Vector3(0, 0, 0)
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 700.0
-offset_bottom = 220.0
+offset_bottom = 320.0
 theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
-text = "IssNostalgia — Physics Sandbox  (Sprint 01)
-SPACE   vertical launch  (15 m/s, light spin)
-H       horizontal launch  (+X, 20 m/s, topspin)
-LMB     click ground to lob the ball there
-R       reset to spawn (0, 1.5, 0)
+text = "IssNostalgia — Physics Sandbox  (Sprint 02)
+SPACE   vertical          (15 m/s, light spin)
+H       horizontal +X     (20 m/s, topspin)
+1       Tiro a giro       (25 m/s @15°, sidespin 8, topspin 2)
+2       Foglia morta      (22 m/s @20°, backspin 6, sidespin 3)
+3       Rasoterra forte   (30 m/s @3°,  topspin 4)
+4       Knuckleball       (28 m/s @10°, ~zero spin)
+LMB     lob to ground point
+R       reset to spawn
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD"]
