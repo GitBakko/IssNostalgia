@@ -168,7 +168,27 @@ sliders; the items are scheduled to be re-evaluated then.
 | S02-A14  | Rasoterra launch elevation 3° → 1° | At 30 m/s the previous 3° elevation produced a 23 cm peak even without errors. 1° caps the launch arc at ~1.4 cm above resting height, deep inside the user's "max ~4 cm" spec for a strong grounder |
 
 ## Sprint 03 — Ground Interaction & Spin Transfer
-_(reserved)_
+
+### Architectural Decisions
+
+| ID      | Decision | Rationale |
+|---------|----------|-----------|
+| S03-A01 | Cross-2002 bounce treats the ball as a **hollow shell** (`I = (2/3) m r²`) | A FIFA match ball is a thin leather/synthetic shell, not a solid sphere. The (2/3) factor changes how impulse splits between linear and angular updates: more spin gets imparted per Newton-second of friction than a solid sphere would |
+| S03-A02 | Variable normal restitution `e_n(\|v_n\|) = e_base · exp(-\|v_n\|/v_ref)` (gated by `variable_restitution_enabled`) | User R2 5.1. Hard impacts deform more, lose more energy. With `v_ref = 8 m/s` a 20 m/s impact yields `e ≈ 0.6 · 0.082 = 0.05` (essentially absorbed), while a 2 m/s impact yields `e ≈ 0.47` (still lively). The angle-aware smoothstep from S02-A10 stacks on top |
+| S03-A03 | Grip vs slip decided by Coulomb cap | Grip-case impulse `J_t_grip = (1+e_t)·\|v_c\|·m·k/(1+k)` with k=2/3. If it exceeds `μ_s · J_n` we slip and clamp to the Coulomb maximum. Single decision, matches the Cross paper's two-regime structure without the full piecewise formulation |
+| S03-A04 | `resolve_static_collisions` now takes / returns `angular_velocity` | Default `Vector3.ZERO` for backward compat with Sprint 1/2 GUT tests. Live integrator and predictor plumb the real ω through. Both branches read `state.angular_velocity` and write it back, so Cross-induced Δω is visible on the mesh rotation |
+| S03-A05 | Surface state via a single global `surface_wet` flag (Sprint 3 scope) | Wet halves μ_s (0.4→0.22) and rolling friction (0.3→0.15), slightly lowers restitution_base (0.6→0.55), softens grass kick (0.9→0.5). All four switched together so the player feels a coherent "wet pitch" rather than independently tuned axes. Sprint 4+ may introduce per-zone surfaces |
+| S03-A06 | Bounce audio is **runtime-synthesised** at scene load | One short damped sine + 2nd harmonic, 16-bit mono WAV held in `AudioStreamWAV`. No external file to license / ship; pitch ± 5 % randomisation per bounce gives variety; volume scales linearly with impact speed clamped to `[0.15, 1.0]` (same gate as `bounced` signal — micro-rolls don't click) |
+| S03-A07 | Squash visual implemented as a `Tween` on `MeshInstance3D.scale` | Compress along the contact normal (`scale -= n_abs · amount`), expand perpendicular by 35 % of amount. Cancelled on each new bounce so successive hits don't stack. 50 ms compress → 180 ms recover. No physics influence; only the rendered mesh moves. Skipped below 1.5 m/s impact to avoid noise |
+| S03-A08 | Slow-motion via `Engine.time_scale = 0.25` toggle on F5 | Cheapest possible "replay-like" diagnostic — no recording, no ring buffer. Physics still simulates correctly at slower wall-clock; this is what the calibrator needs to *see* a bounce. Full record-and-replay deferred to Sprint 4+ |
+
+### Sprint 03 Calibration Sessions
+
+| Date       | Task    | Notes |
+|------------|---------|-------|
+| 2026-05-11 | T01-T02 | Cross-2002 + variable e_n wired in, surface getters added |
+| 2026-05-11 | T03-T06 | Wet toggle (W key), bounce audio, squash tween, slow-mo (F5) |
+| 2026-05-11 | T07     | 7 new GUT tests; total suite 17/17 PASS |
 
 ## Sprint 04 — Debug UI & Runtime Parameters
 _(reserved)_

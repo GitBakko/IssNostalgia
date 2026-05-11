@@ -68,6 +68,8 @@ Vector*
 PackedVector*
 this
 This
+BOUNCE_*
+ROLLING_*
 
 # Backups (runtime-generated, not source)
 resources/backups/*.tres

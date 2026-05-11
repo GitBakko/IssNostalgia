@@ -192,6 +192,26 @@ func _handle_key(event: InputEventKey) -> void:
 			if _launcher: _launcher.launch_grounder_topspin()
 		KEY_4:
 			if _launcher: _launcher.launch_knuckle()
+		KEY_F5:
+			_toggle_slowmo()
+		KEY_W:
+			_toggle_wet_surface()
+
+
+func _toggle_slowmo() -> void:
+	var new_scale: float = 1.0 if Engine.time_scale < 1.0 else 0.25
+	Engine.time_scale = new_scale
+	print("[Sandbox] time_scale = %.2f" % new_scale)
+
+
+func _toggle_wet_surface() -> void:
+	if _ball == null:
+		return
+	var cfg: PhysicsConfig = (_ball as BallPhysics).config
+	if cfg == null:
+		return
+	cfg.surface_wet = not cfg.surface_wet
+	print("[Sandbox] surface_wet = %s" % cfg.surface_wet)
 
 
 func _handle_mouse(event: InputEventMouseButton) -> void:

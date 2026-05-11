@@ -71,6 +71,11 @@ var _knuckle_noise_a: FastNoiseLite
 var _knuckle_noise_b: FastNoiseLite
 var _grass_noise: FastNoiseLite
 var _last_grass_sample: float = 0.0
+var _audio_player: AudioStreamPlayer3D
+var _audio_stream: AudioStreamWAV
+var _mesh_node: MeshInstance3D
+var _base_mesh_scale: Vector3 = Vector3.ONE
+var _squash_tween: Tween
 
 
 func _ready() -> void:
@@ -88,6 +93,9 @@ func _ready() -> void:
 	_apply_debug_visual_scale()
 	_init_knuckle_noise()
 	_init_grass_noise()
+	_init_audio()
+	_init_squash()
+	bounced.connect(_on_self_bounce)
 	if initial_velocity != Vector3.ZERO:
 		linear_velocity = initial_velocity
 	if initial_angular_velocity != Vector3.ZERO:
@@ -110,6 +118,81 @@ func _init_grass_noise() -> void:
 	_grass_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_grass_noise.seed = config.knuckle_seed + 100   ## decoupled stream
 	_grass_noise.frequency = config.grass_roughness_frequency
+
+
+# ---- Audio (T04) ---------------------------------------------------------
+
+func _init_audio() -> void:
+	_audio_stream = _build_bounce_wav(0.15, 120.0, 22050.0, 18.0)
+	_audio_player = AudioStreamPlayer3D.new()
+	_audio_player.stream = _audio_stream
+	_audio_player.unit_size = 6.0
+	_audio_player.max_distance = 80.0
+	add_child(_audio_player)
+
+
+## Synthesise a short damped sine "thunk". Deterministic so replays
+## sound the same.
+func _build_bounce_wav(duration: float, base_freq: float, sample_rate: float,
+		decay: float) -> AudioStreamWAV:
+	var sample_count: int = int(duration * sample_rate)
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(sample_count * 2)  ## 16-bit mono
+	var two_pi_f: float = TAU * base_freq
+	for i in sample_count:
+		var t: float = float(i) / sample_rate
+		# Mix a couple of harmonics for body, exponential decay envelope.
+		var env: float = exp(-decay * t)
+		var s: float = env * (sin(two_pi_f * t) + 0.4 * sin(two_pi_f * 2.0 * t))
+		var sample: int = clampi(int(s * 18000.0), -32767, 32767)
+		data.encode_s16(i * 2, sample)
+	var stream: AudioStreamWAV = AudioStreamWAV.new()
+	stream.data = data
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = int(sample_rate)
+	stream.stereo = false
+	return stream
+
+
+# ---- Squash visual (T05) -------------------------------------------------
+
+func _init_squash() -> void:
+	_mesh_node = get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if _mesh_node != null:
+		_base_mesh_scale = _mesh_node.scale
+
+
+func _on_self_bounce(impact_speed: float, normal: Vector3, _pos: Vector3) -> void:
+	_play_bounce_audio(impact_speed)
+	_play_squash(impact_speed, normal)
+
+
+func _play_bounce_audio(impact_speed: float) -> void:
+	if _audio_player == null:
+		return
+	_audio_player.pitch_scale = randf_range(0.95, 1.05)
+	var loudness: float = clampf(impact_speed / 10.0, 0.15, 1.0)
+	_audio_player.volume_db = linear_to_db(loudness)
+	_audio_player.play()
+
+
+func _play_squash(impact_speed: float, normal: Vector3) -> void:
+	if _mesh_node == null:
+		return
+	if impact_speed < 1.5:
+		return
+	# Cancel any in-flight tween so successive bounces don't stack.
+	if _squash_tween and _squash_tween.is_valid():
+		_squash_tween.kill()
+	var squash_amount: float = clampf(impact_speed / 25.0, 0.0, 0.4)
+	# Compress along the contact normal, expand perpendicular.
+	var n_abs: Vector3 = normal.abs()
+	var compress: Vector3 = _base_mesh_scale * (Vector3.ONE - n_abs * squash_amount)
+	var expand: Vector3 = _base_mesh_scale * ((Vector3.ONE - n_abs) * (squash_amount * 0.35))
+	var target: Vector3 = compress + expand
+	_squash_tween = create_tween()
+	_squash_tween.tween_property(_mesh_node, "scale", target, 0.05)
+	_squash_tween.tween_property(_mesh_node, "scale", _base_mesh_scale, 0.18)
 
 
 ## Resets the knuckle noise streams to a known starting time. Useful for
@@ -152,10 +235,12 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 		v += knuckle_acceleration(state.linear_velocity, omega, _sim_time) * sub_dt
 
 	# Resolve static-world collision (ground + perimeter walls).
-	var collision: Dictionary = resolve_static_collisions(p, v)
+	var collision: Dictionary = resolve_static_collisions(p, v, omega)
 	if collision.collided:
 		p = collision.position
 		v = collision.velocity
+		omega = collision.angular_velocity
+		state.angular_velocity = omega
 		if collision.impact_speed >= BOUNCE_SIGNAL_MIN_SPEED:
 			bounced.emit(collision.impact_speed, collision.normal, p)
 
@@ -183,16 +268,19 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 
 ## Resolve collisions against the (axis-aligned) static world: ground plane
 ## and the four perimeter walls. Returns a Dictionary with keys:
-##   collided     (bool)
-##   position     (Vector3, corrected to keep the ball outside the surface)
-##   velocity     (Vector3, after bounce + tangential friction)
-##   impact_speed (float, |v_normal| at impact, used for audio + telemetry)
-##   normal       (Vector3, surface normal of the dominant contact)
+##   collided          (bool)
+##   position          (Vector3, corrected to keep the ball outside the surface)
+##   velocity          (Vector3, after bounce + tangential friction)
+##   angular_velocity  (Vector3, possibly modified by Cross-2002 spin transfer)
+##   impact_speed      (float, |v_normal| at impact, used for audio + telemetry)
+##   normal            (Vector3, surface normal of the dominant contact)
 ## Pure function — no engine state, safe to reuse in tests and predictor.
-func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
+func resolve_static_collisions(p_in: Vector3, v_in: Vector3,
+		omega_in: Vector3 = Vector3.ZERO) -> Dictionary:
 	var r: float = config.ball_radius
 	var p: Vector3 = p_in
 	var v: Vector3 = v_in
+	var omega: Vector3 = omega_in
 	var collided: bool = false
 	var impact_speed: float = 0.0
 	var impact_normal: Vector3 = Vector3.ZERO
@@ -204,9 +292,9 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.UP
 		p.y = GROUND_Y + r
-		v = _resolve_contact(v, Vector3.UP, vn)
-		# Grass jitter on hard ground bounces — real turf has tufts and
-		# undulations, so the outgoing vector is never perfectly clean.
+		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.UP, vn)
+		v = out.velocity
+		omega = out.angular_velocity
 		if vn >= BOUNCE_SIGNAL_MIN_SPEED:
 			v = _grass_perturb_bounce(p, v, vn)
 		collided = true
@@ -218,7 +306,9 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.LEFT
 		p.x = WALL_MAX_X - r
-		v = _resolve_contact(v, Vector3.LEFT, vn)
+		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.LEFT, vn)
+		v = out.velocity
+		omega = out.angular_velocity
 		collided = true
 
 	# West wall (x = -WALL_MAX_X, normal = +X)
@@ -228,7 +318,9 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.RIGHT
 		p.x = -WALL_MAX_X + r
-		v = _resolve_contact(v, Vector3.RIGHT, vn)
+		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.RIGHT, vn)
+		v = out.velocity
+		omega = out.angular_velocity
 		collided = true
 
 	# North wall (z = -WALL_MAX_Z, normal = +Z = Vector3.BACK)
@@ -238,7 +330,9 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.BACK
 		p.z = -WALL_MAX_Z + r
-		v = _resolve_contact(v, Vector3.BACK, vn)
+		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.BACK, vn)
+		v = out.velocity
+		omega = out.angular_velocity
 		collided = true
 
 	# South wall (z = +WALL_MAX_Z, normal = -Z = Vector3.FORWARD)
@@ -248,15 +342,39 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.FORWARD
 		p.z = WALL_MAX_Z - r
-		v = _resolve_contact(v, Vector3.FORWARD, vn)
+		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.FORWARD, vn)
+		v = out.velocity
+		omega = out.angular_velocity
 		collided = true
 
 	return {
 		"collided": collided,
 		"position": p,
 		"velocity": v,
+		"angular_velocity": omega,
 		"impact_speed": impact_speed,
 		"normal": impact_normal,
+	}
+
+
+## Cross-2002 + soft-contact dispatcher.
+## Hard impact: branch on `config.cross_2002_enabled` — either Cross
+## (which updates angular_velocity too) or the legacy Sprint 2 model.
+## Soft impact: cancel normal component, leave tangent and ω alone.
+func _resolve_contact_full(v: Vector3, omega: Vector3, normal: Vector3,
+		impact_speed: float) -> Dictionary:
+	if impact_speed >= BOUNCE_SIGNAL_MIN_SPEED:
+		if config.cross_2002_enabled:
+			return _bounce_cross_2002(v, omega, normal)
+		return {
+			"velocity": _bounce_velocity(v, normal),
+			"angular_velocity": omega,
+		}
+	# Soft contact
+	var v_n_scalar: float = v.dot(normal)
+	return {
+		"velocity": v - normal * v_n_scalar,
+		"angular_velocity": omega,
 	}
 
 
@@ -278,18 +396,9 @@ func _resolve_contact(v: Vector3, normal: Vector3, impact_speed: float) -> Vecto
 	return v - normal * v_n_scalar
 
 
-## Reflect a velocity across a plane with `normal` (unit, pointing AWAY
-## from the surface). Normal component is multiplied by `-e`, tangential
-## component is dampened by `(1 - mu)`.
-##
-## **Angle-aware restitution** (S02-A10): for a grazing impact
-## (`|v_n| / |v|` small — typical of a rasoterra) we apply a smoothstep
-## that drives the effective restitution to ~0, because in reality the
-## tiny normal component is almost entirely absorbed by the turf and
-## the ball keeps sliding/rolling instead of bouncing into the air.
-## A perpendicular impact keeps the full `restitution_base`. This is a
-## pre-emptive, simplified take on the angle dependence that Sprint 3's
-## Cross-2002 model will refine.
+## Legacy Sprint 2 bounce model — kept around for the GUT tests that
+## lock the pre-Cross behaviour, and for `cross_2002_enabled = false`.
+## Angle-aware (S02-A10) and uses the per-surface restitution base.
 func _bounce_velocity(v: Vector3, normal: Vector3) -> Vector3:
 	var v_n_scalar: float = v.dot(normal)
 	var v_normal: Vector3 = normal * v_n_scalar
@@ -297,10 +406,105 @@ func _bounce_velocity(v: Vector3, normal: Vector3) -> Vector3:
 	var speed: float = v.length()
 	var sin_impact: float = 0.0 if speed < 1e-3 else absf(v_n_scalar) / speed
 	var angle_factor: float = smoothstep(0.05, 0.35, sin_impact)
-	var e_eff: float = config.restitution_base * angle_factor
+	var e_eff: float = _restitution_base() * angle_factor
 	var v_normal_new: Vector3 = -e_eff * v_normal
 	var v_tangent_new: Vector3 = v_tangent * (1.0 - config.friction)
 	return v_normal_new + v_tangent_new
+
+
+## Cross-2002 grip-slip bounce. Treats the ball as a hollow shell
+## (`I = (2/3) m r²`). Computes the tangential velocity AT the contact
+## point (linear + spin) and the impulse needed to reduce it by
+## `(1 + e_t)` (grip case). Coulomb's friction caps the impulse at
+## `μ_s · J_n` (slip case). Both linear velocity and angular velocity
+## change as a consequence — the spin transfer the user asked for.
+##
+## Variable normal restitution (S03-A02): `e_n` decreases with `|v_n|`
+## following `e_base · exp(-|v_n|/v_ref)` when enabled, modelling the
+## extra deformation losses at hard impacts. Surface state (dry / wet)
+## chooses the underlying `e_base` and `μ_s`.
+##
+## The angle-aware smoothstep from S02-A10 is preserved on top — for a
+## grazing impact the effective `e_n` collapses to ~0 so the ball keeps
+## sliding, while the friction logic still kicks the spin around the
+## contact-point velocity.
+func _bounce_cross_2002(v: Vector3, omega: Vector3, normal: Vector3) -> Dictionary:
+	var r: float = config.ball_radius
+	var m: float = config.ball_mass
+	var inertia_factor: float = 2.0 / 3.0  ## hollow sphere shell
+	var I: float = inertia_factor * m * r * r
+
+	var v_n_scalar: float = v.dot(normal)
+	var v_normal: Vector3 = normal * v_n_scalar
+	var v_tangent: Vector3 = v - v_normal
+
+	# Velocity AT the contact point (linear + spin contribution).
+	var r_contact: Vector3 = -normal * r
+	var v_contact: Vector3 = v + omega.cross(r_contact)
+	var v_c_t: Vector3 = v_contact - normal * v_contact.dot(normal)
+	var v_c_mag: float = v_c_t.length()
+
+	# Normal restitution (variable + angle-aware).
+	var e_n: float = _restitution_at_velocity(absf(v_n_scalar))
+	var speed: float = v.length()
+	var sin_impact: float = 0.0 if speed < 1e-3 else absf(v_n_scalar) / speed
+	var angle_factor: float = smoothstep(0.05, 0.35, sin_impact)
+	e_n *= angle_factor
+	var v_normal_new: Vector3 = -e_n * v_normal
+	var J_n_mag: float = (1.0 + e_n) * absf(v_n_scalar) * m
+
+	if v_c_mag < 1e-6:
+		return {
+			"velocity": v_normal_new + v_tangent,
+			"angular_velocity": omega,
+		}
+
+	# Grip case impulse magnitude. For an impulse J_t applied at the
+	# contact point, the contact-point tangential velocity changes by
+	# Δv_c = J_t · (1/m + r²/I) = J_t · (1 + 1/k) / m   (k = inertia_factor).
+	# To go from v_c to −e_t · v_c we need Δv_c = -(1 + e_t)·|v_c| in
+	# the direction opposing v_c. Hence:
+	#   J_t_grip = (1 + e_t) · |v_c| · m · k / (1 + k)
+	var J_t_grip: float = (1.0 + config.bounce_e_t) * v_c_mag * m * inertia_factor / (1.0 + inertia_factor)
+	var J_t_max: float = _mu_s() * J_n_mag
+	var J_t_mag: float = minf(J_t_grip, J_t_max)
+	var J_t: Vector3 = (-v_c_t / v_c_mag) * J_t_mag
+
+	# Apply impulse.
+	var dv_linear: Vector3 = J_t / m
+	var v_tangent_new: Vector3 = v_tangent + dv_linear
+	var d_omega: Vector3 = r_contact.cross(J_t) / I
+	var omega_new: Vector3 = omega + d_omega
+
+	return {
+		"velocity": v_normal_new + v_tangent_new,
+		"angular_velocity": omega_new,
+	}
+
+
+## Variable normal restitution e_n(|v_n|).
+func _restitution_at_velocity(v_n_mag: float) -> float:
+	var e_base: float = _restitution_base()
+	if not config.variable_restitution_enabled:
+		return e_base
+	return e_base * exp(-v_n_mag / config.restitution_v_ref)
+
+
+## Surface-sensitive parameter getters.
+func _restitution_base() -> float:
+	return config.restitution_base_wet if config.surface_wet else config.restitution_base
+
+
+func _mu_s() -> float:
+	return config.bounce_mu_s_wet if config.surface_wet else config.bounce_mu_s
+
+
+func _rolling_friction() -> float:
+	return config.rolling_friction_wet if config.surface_wet else config.rolling_friction_coeff
+
+
+func _grass_kick_amount() -> float:
+	return config.grass_roughness_kick_wet if config.surface_wet else config.grass_roughness_kick
 
 
 ## Continuous rolling resistance. Applies an opposing-to-motion deceleration
@@ -325,7 +529,7 @@ func apply_rolling_resistance(p: Vector3, v: Vector3, sub_dt: float) -> Vector3:
 	var speed_t: float = v_t.length()
 	if speed_t < 1e-4:
 		return v
-	var decel: float = config.rolling_friction_coeff * config.gravity
+	var decel: float = _rolling_friction() * config.gravity
 	var dv: float = min(decel * sub_dt, speed_t)
 	var scale: float = (speed_t - dv) / speed_t
 	return Vector3(v_t.x * scale, v.y, v_t.z * scale)
@@ -420,7 +624,7 @@ func _grass_perturb_bounce(p: Vector3, v: Vector3, vn: float) -> Vector3:
 	var n_x: float = _grass_noise.get_noise_2d(p.x + 73.5, p.z - 41.0)
 	var n_z: float = _grass_noise.get_noise_2d(p.x - 91.0, p.z + 17.0)
 	var speed_factor: float = clampf((vn - BOUNCE_SIGNAL_MIN_SPEED) / 8.0, 0.0, 1.0)
-	var kick: float = config.grass_roughness_kick * speed_factor
+	var kick: float = _grass_kick_amount() * speed_factor
 	v.y += absf(n_y) * kick * 0.7   ## always upward (turf pushes up)
 	v.x += n_x * kick * 0.45
 	v.z += n_z * kick * 0.45
@@ -456,7 +660,7 @@ func apply_grass_roughness(p: Vector3, v: Vector3, sub_dt: float) -> Vector3:
 		var speed_factor: float = clampf(
 			(v_t - config.grass_roughness_min_speed) / 20.0, 0.0, 1.0,
 		)
-		var kick: float = config.grass_roughness_kick * speed_factor * sample
+		var kick: float = _grass_kick_amount() * speed_factor * sample
 		v.y += kick
 	return v
 
@@ -520,18 +724,20 @@ func predict_forward(p0: Vector3, v0: Vector3, omega0: Vector3,
 	out.resize(steps)
 	var p: Vector3 = p0
 	var v: Vector3 = v0
+	var omega: Vector3 = omega0
 	var t: float = time0
 	for i in steps:
 		t += sub_dt
-		var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega0)
+		var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega)
 		p = step.position
 		v = step.velocity
 		if config.knuckle_enabled:
 			v += knuckle_acceleration(v0, omega0, t) * sub_dt
-		var col: Dictionary = resolve_static_collisions(p, v)
+		var col: Dictionary = resolve_static_collisions(p, v, omega)
 		if col.collided:
 			p = col.position
 			v = col.velocity
+			omega = col.angular_velocity
 		v = apply_rolling_resistance(p, v, sub_dt)
 		v = apply_grass_roughness(p, v, sub_dt)
 		out[i] = p
