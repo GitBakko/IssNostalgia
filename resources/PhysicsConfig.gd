@@ -53,16 +53,21 @@ extends Resource
 @export var grass_roughness_frequency: float = 0.6   ## bumps per metre of travel
                                                      ## (FastNoiseLite frequency on
                                                      ## the 2D position sample)
-@export var restitution_v_ref: float = 8.0      ## v_ref in exp decay (Sprint 3)
+@export var restitution_v_ref: float = 30.0     ## v_ref in exp decay. Original
+                                                ## R2 lock at 8.0 produced e ≈ 0.27 on
+                                                ## a 6 m/s drop, which kills the bounce.
+                                                ## 30 m/s gives e ≈ 0.49 at 6 m/s and
+                                                ## e ≈ 0.31 at 20 m/s — milder than the
+                                                ## locked target but visually correct
 @export var bounce_e_t: float = 0.5             ## Cross 2002 tangential restitution
 @export var bounce_mu_s: float = 0.4            ## Cross 2002 static friction (dry)
 @export_group("Surface")
 @export var surface_wet: bool = false           ## global toggle (Sprint 3); Sprint 4+
                                                 ## may add per-zone surfaces
-@export var bounce_mu_s_wet: float = 0.22       ## ~half of dry on wet grass
-@export var rolling_friction_wet: float = 0.15  ## ~half of dry rolling
-@export var restitution_base_wet: float = 0.55  ## slightly absorbent vs dry
-@export var grass_roughness_kick_wet: float = 0.5 ## wet turf is smoother
+@export var bounce_mu_s_wet: float = 0.15       ## much less grip when wet
+@export var rolling_friction_wet: float = 0.10  ## ball rolls ~3× as far
+@export var restitution_base_wet: float = 0.40  ## clearly more absorbent
+@export var grass_roughness_kick_wet: float = 0.2 ## wet turf is smooth
 
 # ---- Magnus (activated in Sprint 2) --------------------------------------
 @export_group("Magnus")

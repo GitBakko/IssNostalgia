@@ -71,7 +71,7 @@ var _knuckle_noise_a: FastNoiseLite
 var _knuckle_noise_b: FastNoiseLite
 var _grass_noise: FastNoiseLite
 var _last_grass_sample: float = 0.0
-var _audio_player: AudioStreamPlayer3D
+var _audio_player: AudioStreamPlayer
 var _audio_stream: AudioStreamWAV
 var _mesh_node: MeshInstance3D
 var _base_mesh_scale: Vector3 = Vector3.ONE
@@ -123,11 +123,12 @@ func _init_grass_noise() -> void:
 # ---- Audio (T04) ---------------------------------------------------------
 
 func _init_audio() -> void:
-	_audio_stream = _build_bounce_wav(0.15, 120.0, 22050.0, 18.0)
-	_audio_player = AudioStreamPlayer3D.new()
+	_audio_stream = _build_bounce_wav(0.18, 110.0, 22050.0, 14.0)
+	# 2D player so distance attenuation never silences the bounce.
+	# Sprint 4+ may swap to 3D once a near-camera follow exists.
+	_audio_player = AudioStreamPlayer.new()
 	_audio_player.stream = _audio_stream
-	_audio_player.unit_size = 6.0
-	_audio_player.max_distance = 80.0
+	_audio_player.bus = &"Master"
 	add_child(_audio_player)
 
 
@@ -143,8 +144,9 @@ func _build_bounce_wav(duration: float, base_freq: float, sample_rate: float,
 		var t: float = float(i) / sample_rate
 		# Mix a couple of harmonics for body, exponential decay envelope.
 		var env: float = exp(-decay * t)
-		var s: float = env * (sin(two_pi_f * t) + 0.4 * sin(two_pi_f * 2.0 * t))
-		var sample: int = clampi(int(s * 18000.0), -32767, 32767)
+		var s: float = env * (sin(two_pi_f * t) + 0.45 * sin(two_pi_f * 2.0 * t)
+			+ 0.18 * sin(two_pi_f * 3.0 * t))
+		var sample: int = clampi(int(s * 30000.0), -32767, 32767)
 		data.encode_s16(i * 2, sample)
 	var stream: AudioStreamWAV = AudioStreamWAV.new()
 	stream.data = data
@@ -171,7 +173,9 @@ func _play_bounce_audio(impact_speed: float) -> void:
 	if _audio_player == null:
 		return
 	_audio_player.pitch_scale = randf_range(0.95, 1.05)
-	var loudness: float = clampf(impact_speed / 10.0, 0.15, 1.0)
+	# 0.4 minimum so every bounce is clearly audible; cap above 0 dB
+	# (+6 dB) so really hard hits still pop without distortion.
+	var loudness: float = clampf(impact_speed / 8.0, 0.4, 2.0)
 	_audio_player.volume_db = linear_to_db(loudness)
 	_audio_player.play()
 
@@ -179,20 +183,22 @@ func _play_bounce_audio(impact_speed: float) -> void:
 func _play_squash(impact_speed: float, normal: Vector3) -> void:
 	if _mesh_node == null:
 		return
-	if impact_speed < 1.5:
+	if impact_speed < 0.8:
 		return
-	# Cancel any in-flight tween so successive bounces don't stack.
 	if _squash_tween and _squash_tween.is_valid():
 		_squash_tween.kill()
-	var squash_amount: float = clampf(impact_speed / 25.0, 0.0, 0.4)
-	# Compress along the contact normal, expand perpendicular.
+	# Up to 60 % compression along the contact normal; expand
+	# perpendicular by 45 % of the squash so the silhouette is
+	# unambiguous from any angle.
+	var squash_amount: float = clampf(impact_speed / 12.0, 0.10, 0.60)
 	var n_abs: Vector3 = normal.abs()
 	var compress: Vector3 = _base_mesh_scale * (Vector3.ONE - n_abs * squash_amount)
-	var expand: Vector3 = _base_mesh_scale * ((Vector3.ONE - n_abs) * (squash_amount * 0.35))
+	var expand: Vector3 = _base_mesh_scale * ((Vector3.ONE - n_abs) * (squash_amount * 0.45))
 	var target: Vector3 = compress + expand
 	_squash_tween = create_tween()
-	_squash_tween.tween_property(_mesh_node, "scale", target, 0.05)
-	_squash_tween.tween_property(_mesh_node, "scale", _base_mesh_scale, 0.18)
+	_squash_tween.set_trans(Tween.TRANS_QUAD)
+	_squash_tween.tween_property(_mesh_node, "scale", target, 0.08)
+	_squash_tween.tween_property(_mesh_node, "scale", _base_mesh_scale, 0.30)
 
 
 ## Resets the knuckle noise streams to a known starting time. Useful for
