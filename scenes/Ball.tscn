@@ -29,7 +29,7 @@ contact_monitor = true
 max_contacts_reported = 8
 script = ExtResource("1_ball_physics")
 config = ExtResource("2_config")
-debug_visual_scale = 2.0
+debug_visual_scale = 1.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("SphereShape3D_ball")
