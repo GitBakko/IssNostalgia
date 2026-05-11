@@ -101,34 +101,32 @@ func launch_at_angle(direction: Vector3, speed: float,
 
 # ---- Macro shots (Sprint 2 calibration targets, round-2 7.3) -------------
 
-## Tiro a giro: 25 m/s @ 15°, sidespin 8 rad/s, light topspin 2 rad/s.
-## Target: ~3-4 m of lateral curve over 20 m of flight.
-func launch_curve_shot() -> void:
-	var spin: Vector3 = compose_spin(Vector3.RIGHT, 2.0, 8.0, 0.0)
-	launch_at_angle(Vector3.RIGHT, 25.0, 15.0, spin)
+## Tiro a giro toward `direction`. 25 m/s @ 15°, sidespin 8 rad/s,
+## light topspin 2 rad/s. Target: ~3-4 m of lateral curve over 20 m of flight.
+func launch_curve_shot(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, 2.0, 8.0, 0.0)
+	launch_at_angle(direction, 25.0, 15.0, spin)
 
 
-## Foglia morta: 22 m/s @ 20°, backspin 6 rad/s, mild sidespin 3 rad/s.
-## Target: trajectory that drops sharply in the last 5 m.
-func launch_dead_leaf() -> void:
-	var spin: Vector3 = compose_spin(Vector3.RIGHT, -6.0, 3.0, 0.0)
-	launch_at_angle(Vector3.RIGHT, 22.0, 20.0, spin)
+## Foglia morta toward `direction`. 22 m/s @ 20°, backspin 6 rad/s,
+## mild sidespin 3 rad/s. Trajectory drops sharply in the last 5 m.
+func launch_dead_leaf(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, -6.0, 3.0, 0.0)
+	launch_at_angle(direction, 22.0, 20.0, spin)
 
 
-## Rasoterra forte: 30 m/s @ 1° low arc, topspin 4 rad/s.
-## The 1° elevation keeps the launch flat (bottom-of-ball stays within
-## ~1.5 cm of the ground); the topspin gives a downward Magnus force
-## that helps the ball glue to the surface. Subsequent micro-bumps
-## come from the grass-roughness noise stream.
-func launch_grounder_topspin() -> void:
-	var spin: Vector3 = compose_spin(Vector3.RIGHT, 4.0, 0.0, 0.0)
-	launch_at_angle(Vector3.RIGHT, 30.0, 1.0, spin)
+## Rasoterra forte toward `direction`. 30 m/s @ 1° low arc, topspin 4 rad/s.
+## The 1° elevation keeps the launch flat; topspin gives a downward
+## Magnus force that helps the ball glue to the surface.
+func launch_grounder_topspin(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
+	launch_at_angle(direction, 30.0, 1.0, spin)
 
 
-## Knuckleball: 28 m/s @ 10°, near-zero spin so the Simplex noise
-## stream dominates the trajectory.
-func launch_knuckle() -> void:
-	launch_at_angle(Vector3.RIGHT, 28.0, 10.0, Vector3.ZERO)
+## Knuckleball toward `direction`. 28 m/s @ 10°, near-zero spin so the
+## Simplex noise stream dominates the trajectory.
+func launch_knuckle(direction: Vector3 = Vector3.RIGHT) -> void:
+	launch_at_angle(direction, 28.0, 10.0, Vector3.ZERO)
 
 
 func launch_vertical(speed: float = -1.0, spin_z: float = INF) -> void:
@@ -173,5 +171,9 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.25, 0.5, 6.0)
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var t_flight: float = 2.0 * v_vertical / 9.81
-	var v_horizontal: float = dist / t_flight
+	# 0.92 empirical undershoot factor: drag at sandbox lob speeds (4-25 m/s)
+	# is hard to invert in closed form. Slight conservative bias means the
+	# ball never overshoots the click; if it lands a tiny bit short, the
+	# user can still see where the click was relative to the impact mark.
+	var v_horizontal: float = dist / t_flight * 0.92
 	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)

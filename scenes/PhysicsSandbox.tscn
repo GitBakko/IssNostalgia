@@ -45,11 +45,11 @@ theme_override_font_sizes/font_size = 22
 text = "IssNostalgia — Physics Sandbox  (Sprint 02)
 SPACE   vertical          (15 m/s, light spin)
 H       horizontal +X     (20 m/s, topspin)
-1       Tiro a giro       (25 m/s @15°, sidespin 8, topspin 2)
-2       Foglia morta      (22 m/s @20°, backspin 6, sidespin 3)
-3       Rasoterra forte   (30 m/s @1°,  topspin 4)
-4       Knuckleball       (28 m/s @10°, ~zero spin)
-LMB     lob to ground point
+1       Tiro a giro       → mouse  (25 m/s @15°, sidespin 8, topspin 2)
+2       Foglia morta      → mouse  (22 m/s @20°, backspin 6, sidespin 3)
+3       Rasoterra forte   → mouse  (30 m/s @1°,  topspin 4)
+4       Knuckleball       → mouse  (28 m/s @10°, ~zero spin)
+LMB     lob to clicked ground point
 R       reset to spawn (ground)
 W       toggle dry / wet surface
 F5      toggle slow-motion (0.25x)

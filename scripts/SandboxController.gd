@@ -185,17 +185,37 @@ func _handle_key(event: InputEventKey) -> void:
 		KEY_R:
 			if _launcher: _launcher.reset_ball()
 		KEY_1:
-			if _launcher: _launcher.launch_curve_shot()
+			if _launcher: _launcher.launch_curve_shot(_aim_direction())
 		KEY_2:
-			if _launcher: _launcher.launch_dead_leaf()
+			if _launcher: _launcher.launch_dead_leaf(_aim_direction())
 		KEY_3:
-			if _launcher: _launcher.launch_grounder_topspin()
+			if _launcher: _launcher.launch_grounder_topspin(_aim_direction())
 		KEY_4:
-			if _launcher: _launcher.launch_knuckle()
+			if _launcher: _launcher.launch_knuckle(_aim_direction())
 		KEY_F5:
 			_toggle_slowmo()
 		KEY_W:
 			_toggle_wet_surface()
+
+
+## Horizontal world direction from the ball to the current mouse pointer's
+## ground-plane intersection. Falls back to +X when the mouse points off
+## the field (camera looking up).
+func _aim_direction() -> Vector3:
+	if _camera == null or _ball == null:
+		return Vector3.RIGHT
+	var screen_pos: Vector2 = get_viewport().get_mouse_position()
+	var from: Vector3 = _camera.project_ray_origin(screen_pos)
+	var dir3: Vector3 = _camera.project_ray_normal(screen_pos)
+	if dir3.y >= -0.001:
+		return Vector3.RIGHT
+	var t: float = -from.y / dir3.y
+	var ground: Vector3 = from + dir3 * t
+	var delta: Vector3 = ground - _ball.global_position
+	delta.y = 0.0
+	if delta.length() < 0.01:
+		return Vector3.RIGHT
+	return delta.normalized()
 
 
 func _toggle_slowmo() -> void:
