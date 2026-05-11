@@ -1,6 +1,6 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene format=3 uid="uid://cpdlgt2wipuh8"]
 
-[ext_resource type="Script" path="res://scripts/SandboxController.gd" id="1_controller"]
+[ext_resource type="Script" uid="uid://drfr2rrmmlrf5" path="res://scripts/SandboxController.gd" id="1_controller"]
 [ext_resource type="PackedScene" path="res://scenes/Field.tscn" id="2_field"]
 [ext_resource type="PackedScene" path="res://scenes/Ball.tscn" id="3_ball"]
 [ext_resource type="PackedScene" path="res://scenes/BallLauncher.tscn" id="4_launcher"]
@@ -14,38 +14,34 @@ ambient_light_color = Color(0.55, 0.72, 0.88, 1)
 ambient_light_sky_contribution = 0.0
 ambient_light_energy = 0.4
 tonemap_mode = 2
-tonemap_exposure = 1.0
-glow_enabled = false
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributes_main"]
-exposure_multiplier = 1.0
 
-[node name="PhysicsSandbox" type="Node3D"]
+[node name="PhysicsSandbox" type="Node3D" unique_id=1429607885]
 script = ExtResource("1_controller")
 
-[node name="Field" parent="." instance=ExtResource("2_field")]
+[node name="Field" parent="." unique_id=1083489840 instance=ExtResource("2_field")]
+transform = Transform3D(-0.48204416, 0, 0.8761469, 0, 1, 0, -0.8761469, 0, -0.48204416, 0, 0, 0)
 
-[node name="Ball" parent="." instance=ExtResource("3_ball")]
+[node name="Ball" parent="." unique_id=1262271280 instance=ExtResource("3_ball")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
-initial_velocity = Vector3(0, 0, 0)
-initial_angular_velocity = Vector3(0, 0, 0)
 
-[node name="BallLauncher" parent="." instance=ExtResource("4_launcher")]
+[node name="BallLauncher" parent="." unique_id=1890719044 instance=ExtResource("4_launcher")]
 
-[node name="TrajectoryVisualizer" parent="." instance=ExtResource("5_traj")]
+[node name="TrajectoryVisualizer" parent="." unique_id=1016011643 instance=ExtResource("5_traj")]
 ball_path = NodePath("../Ball")
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1055643380]
 
-[node name="Instructions" type="Label" parent="HUD"]
+[node name="Instructions" type="Label" parent="HUD" unique_id=1672820386]
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 700.0
 offset_bottom = 320.0
-theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 22
 text = "IssNostalgia — Physics Sandbox  (Sprint 02)
 SPACE   vertical          (15 m/s, light spin)
 H       horizontal +X     (20 m/s, topspin)
@@ -57,32 +53,32 @@ LMB     lob to ground point
 R       reset to spawn (ground)
 ESC     quit"
 
-[node name="Telemetry" type="Label" parent="HUD"]
+[node name="Telemetry" type="Label" parent="HUD" unique_id=564516205]
+anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -360.0
 offset_top = 24.0
 offset_right = -24.0
 offset_bottom = 140.0
-theme_override_font_sizes/font_size = 20
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
-horizontal_alignment = 2
+theme_override_font_sizes/font_size = 20
 text = "ball: —"
+horizontal_alignment = 2
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=998534349]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 35, 20)
 fov = 45.0
 near = 0.5
 far = 500.0
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1214035253]
 transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 50, 0)
-light_energy = 1.1
 light_color = Color(1, 0.97, 0.9, 1)
-shadow_enabled = false
+light_energy = 1.1
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1282947617]
 environment = SubResource("Environment_main")
 camera_attributes = SubResource("CameraAttributes_main")
