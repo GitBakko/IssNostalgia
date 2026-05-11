@@ -108,7 +108,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	var v: Vector3 = state.linear_velocity
 	var p: Vector3 = state.transform.origin
-	var step: Dictionary = integrate_step_pure(p, v, sub_dt)
+	var omega: Vector3 = state.angular_velocity
+	var step: Dictionary = integrate_step_pure(p, v, sub_dt, omega)
 	p = step.position
 	v = step.velocity
 
@@ -133,7 +134,6 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	# must do it ourselves. Sprint 3 (Cross-2002) will start *modifying*
 	# angular_velocity at bounces; for now we just integrate the kinematic
 	# rotation so the mesh visibly spins.
-	var omega: Vector3 = state.angular_velocity
 	if omega.length_squared() > 1e-12:
 		var axis: Vector3 = omega.normalized()
 		var angle: float = omega.length() * sub_dt
@@ -277,11 +277,13 @@ func apply_rolling_resistance(p: Vector3, v: Vector3, sub_dt: float) -> Vector3:
 	return Vector3(v_t.x * scale, v.y, v_t.z * scale)
 
 
-## Pure-function integrator. Given a position/velocity, returns the next
-## position/velocity after `sub_dt` seconds. No side effects, no engine
-## state. Used by tests and by the forward predictor.
-func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float) -> Dictionary:
-	var f: Vector3 = compute_force(velocity)
+## Pure-function integrator. Given a position/velocity (+ optional spin),
+## returns the next position/velocity after `sub_dt` seconds. No side
+## effects, no engine state. Used by `_integrate_substep`, by the
+## forward predictor (Sprint 2 T05) and by the GUT tests.
+func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float,
+		omega: Vector3 = Vector3.ZERO) -> Dictionary:
+	var f: Vector3 = compute_force(velocity, omega)
 	var a: Vector3 = f / config.ball_mass
 	# semi-implicit Euler: velocity first, then position with the new velocity
 	var v_new: Vector3 = velocity + a * sub_dt
@@ -289,10 +291,39 @@ func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float) ->
 	return {"position": p_new, "velocity": v_new}
 
 
-## Sum of all active forces on the ball at the given velocity.
-## Sprint 1: gravity + drag. Sprint 2 will add Magnus + knuckle perturbation.
-func compute_force(velocity: Vector3) -> Vector3:
-	return _gravity_force() + _drag_force(velocity)
+## Sum of all active forces on the ball.
+## Sprint 1: gravity + drag.
+## Sprint 2: + Magnus when `config.magnus_enabled` (T01); knuckle
+## perturbation is applied separately inside `_integrate_substep`
+## because it needs simulation time (T02).
+func compute_force(velocity: Vector3, omega: Vector3 = Vector3.ZERO) -> Vector3:
+	var f: Vector3 = _gravity_force() + _drag_force(velocity)
+	if config.magnus_enabled:
+		f += _magnus_force(velocity, omega)
+	return f
+
+
+## Magnus lift force.
+##   F_M = 0.5 · ρ · A · Cl(S) · |v|² · (ω̂ × v̂)
+## with the saturating lift coefficient Cl(S) = S / (S + 0.5), spin
+## parameter S = r·|ω| / |v|, capped at `magnus_spin_param_cap`.
+##
+## The locked formula in SPRINT_02_PLAN (M02) reads `|v|` instead of
+## `|v|²` — a units check shows that produces kg/s, not Newton, so the
+## correct factor is `|v|²`. PHYSICS_LOG S02-A01 records the correction.
+func _magnus_force(velocity: Vector3, omega: Vector3) -> Vector3:
+	var v_mag: float = velocity.length()
+	if v_mag < config.magnus_min_speed:
+		return Vector3.ZERO
+	var w_mag: float = omega.length()
+	if w_mag < 1e-6:
+		return Vector3.ZERO
+	var s: float = (config.ball_radius * w_mag) / v_mag
+	s = min(s, config.magnus_spin_param_cap)
+	var cl: float = s / (s + 0.5)
+	var area: float = PI * config.ball_radius * config.ball_radius
+	var dir: Vector3 = (omega / w_mag).cross(velocity / v_mag)
+	return 0.5 * config.air_density * area * cl * v_mag * v_mag * dir
 
 
 func _gravity_force() -> Vector3:

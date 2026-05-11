@@ -40,8 +40,10 @@ extends Resource
 
 # ---- Magnus (activated in Sprint 2) --------------------------------------
 @export_group("Magnus")
-@export var magnus_enabled: bool = false
-@export var magnus_spin_param_cap: float = 1.5  ## cap on S = r*|omega|/|v|
+@export var magnus_enabled: bool = true                  ## flipped on Sprint 2
+@export var magnus_spin_param_cap: float = 1.5           ## cap on S = r*|ω|/|v|
+@export var magnus_min_speed: float = 0.5                ## skip Magnus when |v| below
+                                                         ## this (would explode S = r|ω|/|v|)
 
 # ---- Knuckleball (activated in Sprint 2) ---------------------------------
 @export_group("Knuckleball")

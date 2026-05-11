@@ -134,7 +134,14 @@ _(to be populated during implementation)_
 ---
 
 ## Sprint 02 — Magnus & Spin
-_(reserved)_
+
+### Architectural Decisions
+
+| ID       | Decision | Rationale |
+|----------|----------|-----------|
+| S02-A01  | Magnus formula uses `\|v\|²` not `\|v\|` | SPRINT_02_PLAN M02 wrote `F = 0.5·ρ·A·Cl·\|v\|·(ω̂ × v̂)` which dimensionally produces kg/s, not N. The textbook lift formula needs `\|v\|²`. Implemented as `F = 0.5·ρ·A·Cl(S)·\|v\|²·(ω̂ × v̂)`, units check OK |
+| S02-A02  | `magnus_min_speed` floor (default 0.5 m/s) | `S = r\|ω\|/\|v\|` blows up as `\|v\| → 0`. We early-return when `\|v\| < magnus_min_speed` (slow / resting ball gets no Magnus anyway) instead of relying on the spin-parameter cap to mask the singularity |
+| S02-A03  | `compute_force` and `integrate_step_pure` now take `omega` (default `Vector3.ZERO`) | Default keeps every existing Sprint 1 GUT test and predictor caller backward-compatible. Sprint 2 callers pass the real ω so Magnus enters the integration |
 
 ## Sprint 03 — Ground Interaction & Spin Transfer
 _(reserved)_
