@@ -23,16 +23,13 @@ const SPEED_THRESHOLD_MID: float = 15.0
 const SPEED_THRESHOLD_HIGH: float = 25.0
 const MIN_SPEED_FOR_DRAG: float = 0.001
 
-# ---- Static world geometry (Sprint 1 axis-aligned containment) ------------
-# Ground plane at y = 0. Perimeter walls form an AABB just outside the
-# regulation pitch (105 x 68 m, half-extents 52.5 x 34) with a 5 m runoff.
-# Sprint 5 will revisit when arbitrary obstacles enter the scene.
+# ---- Static world geometry ------------------------------------------------
+# Ground plane at y = 0. The sandbox no longer has perimeter walls:
+# the previous invisible AABB walls at the field edges produced an
+# "invisible wall" bug — the ball would slam into them at the end of a
+# long roll and ricochet by >90°. Sandbox doesn't need containment;
+# Sprint 5+ stadium nets will be visible MeshInstance3D bodies anyway.
 const GROUND_Y: float = 0.0
-const FIELD_HALF_X: float = 52.5
-const FIELD_HALF_Z: float = 34.0
-const WALL_BUFFER: float = 5.0
-const WALL_MAX_X: float = FIELD_HALF_X + WALL_BUFFER
-const WALL_MAX_Z: float = FIELD_HALF_Z + WALL_BUFFER
 
 # Normal-impact speed cut-off (m/s) that separates a real bounce
 # from a soft / resting contact.
@@ -341,7 +338,10 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3,
 	var impact_speed: float = 0.0
 	var impact_normal: Vector3 = Vector3.ZERO
 
-	# Ground (normal = +Y)
+	# Ground (normal = +Y). Only contact this sandbox handles —
+	# perimeter walls were removed (S03-A18) because they were
+	# invisible to the user and caused surprise ricochets at the
+	# end of long rolls.
 	if p.y < GROUND_Y + r and v.y < 0.0:
 		var vn: float = -v.y
 		if vn > impact_speed:
@@ -353,54 +353,6 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3,
 		omega = out.angular_velocity
 		if vn >= BOUNCE_SIGNAL_MIN_SPEED:
 			v = _grass_perturb_bounce(p, v, vn)
-		collided = true
-
-	# East wall (x = +WALL_MAX_X, normal = -X)
-	if p.x > WALL_MAX_X - r and v.x > 0.0:
-		var vn: float = v.x
-		if vn > impact_speed:
-			impact_speed = vn
-			impact_normal = Vector3.LEFT
-		p.x = WALL_MAX_X - r
-		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.LEFT, vn)
-		v = out.velocity
-		omega = out.angular_velocity
-		collided = true
-
-	# West wall (x = -WALL_MAX_X, normal = +X)
-	if p.x < -WALL_MAX_X + r and v.x < 0.0:
-		var vn: float = -v.x
-		if vn > impact_speed:
-			impact_speed = vn
-			impact_normal = Vector3.RIGHT
-		p.x = -WALL_MAX_X + r
-		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.RIGHT, vn)
-		v = out.velocity
-		omega = out.angular_velocity
-		collided = true
-
-	# North wall (z = -WALL_MAX_Z, normal = +Z = Vector3.BACK)
-	if p.z < -WALL_MAX_Z + r and v.z < 0.0:
-		var vn: float = -v.z
-		if vn > impact_speed:
-			impact_speed = vn
-			impact_normal = Vector3.BACK
-		p.z = -WALL_MAX_Z + r
-		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.BACK, vn)
-		v = out.velocity
-		omega = out.angular_velocity
-		collided = true
-
-	# South wall (z = +WALL_MAX_Z, normal = -Z = Vector3.FORWARD)
-	if p.z > WALL_MAX_Z - r and v.z > 0.0:
-		var vn: float = v.z
-		if vn > impact_speed:
-			impact_speed = vn
-			impact_normal = Vector3.FORWARD
-		p.z = WALL_MAX_Z - r
-		var out: Dictionary = _resolve_contact_full(v, omega, Vector3.FORWARD, vn)
-		v = out.velocity
-		omega = out.angular_velocity
 		collided = true
 
 	return {
