@@ -55,6 +55,8 @@ tests/last_run.log
 # Local screenshots (validation artifacts, not source)
 t*_screenshot.png
 t*_screenshot.png.import
+t_*.png
+t_*.png.import
 screenshots/
 
 # Stray ephemera that PowerShell redirections can leave behind
