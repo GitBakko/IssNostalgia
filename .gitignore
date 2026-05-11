@@ -63,6 +63,9 @@ screenshots/
 1e-*
 target
 void
+Color
+Vector*
+PackedVector*
 
 # Backups (runtime-generated, not source)
 resources/backups/*.tres
