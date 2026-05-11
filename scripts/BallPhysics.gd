@@ -71,6 +71,11 @@ var _knuckle_noise_a: FastNoiseLite
 var _knuckle_noise_b: FastNoiseLite
 var _grass_noise: FastNoiseLite
 var _last_grass_sample: float = 0.0
+var _audio_player: AudioStreamPlayer3D
+var _audio_stream: AudioStreamWAV
+var _mesh_node: MeshInstance3D
+var _base_mesh_scale: Vector3 = Vector3.ONE
+var _squash_tween: Tween
 
 
 func _ready() -> void:
@@ -88,6 +93,9 @@ func _ready() -> void:
 	_apply_debug_visual_scale()
 	_init_knuckle_noise()
 	_init_grass_noise()
+	_init_audio()
+	_init_squash()
+	bounced.connect(_on_self_bounce)
 	if initial_velocity != Vector3.ZERO:
 		linear_velocity = initial_velocity
 	if initial_angular_velocity != Vector3.ZERO:
@@ -110,6 +118,81 @@ func _init_grass_noise() -> void:
 	_grass_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_grass_noise.seed = config.knuckle_seed + 100   ## decoupled stream
 	_grass_noise.frequency = config.grass_roughness_frequency
+
+
+# ---- Audio (T04) ---------------------------------------------------------
+
+func _init_audio() -> void:
+	_audio_stream = _build_bounce_wav(0.15, 120.0, 22050.0, 18.0)
+	_audio_player = AudioStreamPlayer3D.new()
+	_audio_player.stream = _audio_stream
+	_audio_player.unit_size = 6.0
+	_audio_player.max_distance = 80.0
+	add_child(_audio_player)
+
+
+## Synthesise a short damped sine "thunk". Deterministic so replays
+## sound the same.
+func _build_bounce_wav(duration: float, base_freq: float, sample_rate: float,
+		decay: float) -> AudioStreamWAV:
+	var sample_count: int = int(duration * sample_rate)
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(sample_count * 2)  ## 16-bit mono
+	var two_pi_f: float = TAU * base_freq
+	for i in sample_count:
+		var t: float = float(i) / sample_rate
+		# Mix a couple of harmonics for body, exponential decay envelope.
+		var env: float = exp(-decay * t)
+		var s: float = env * (sin(two_pi_f * t) + 0.4 * sin(two_pi_f * 2.0 * t))
+		var sample: int = clampi(int(s * 18000.0), -32767, 32767)
+		data.encode_s16(i * 2, sample)
+	var stream: AudioStreamWAV = AudioStreamWAV.new()
+	stream.data = data
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = int(sample_rate)
+	stream.stereo = false
+	return stream
+
+
+# ---- Squash visual (T05) -------------------------------------------------
+
+func _init_squash() -> void:
+	_mesh_node = get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if _mesh_node != null:
+		_base_mesh_scale = _mesh_node.scale
+
+
+func _on_self_bounce(impact_speed: float, normal: Vector3, _pos: Vector3) -> void:
+	_play_bounce_audio(impact_speed)
+	_play_squash(impact_speed, normal)
+
+
+func _play_bounce_audio(impact_speed: float) -> void:
+	if _audio_player == null:
+		return
+	_audio_player.pitch_scale = randf_range(0.95, 1.05)
+	var loudness: float = clampf(impact_speed / 10.0, 0.15, 1.0)
+	_audio_player.volume_db = linear_to_db(loudness)
+	_audio_player.play()
+
+
+func _play_squash(impact_speed: float, normal: Vector3) -> void:
+	if _mesh_node == null:
+		return
+	if impact_speed < 1.5:
+		return
+	# Cancel any in-flight tween so successive bounces don't stack.
+	if _squash_tween and _squash_tween.is_valid():
+		_squash_tween.kill()
+	var squash_amount: float = clampf(impact_speed / 25.0, 0.0, 0.4)
+	# Compress along the contact normal, expand perpendicular.
+	var n_abs: Vector3 = normal.abs()
+	var compress: Vector3 = _base_mesh_scale * (Vector3.ONE - n_abs * squash_amount)
+	var expand: Vector3 = _base_mesh_scale * ((Vector3.ONE - n_abs) * (squash_amount * 0.35))
+	var target: Vector3 = compress + expand
+	_squash_tween = create_tween()
+	_squash_tween.tween_property(_mesh_node, "scale", target, 0.05)
+	_squash_tween.tween_property(_mesh_node, "scale", _base_mesh_scale, 0.18)
 
 
 ## Resets the knuckle noise streams to a known starting time. Useful for
