@@ -24,11 +24,15 @@ extends Resource
 # ---- Ground interaction (Sprint 3 will activate variable model) ----------
 @export_group("Ground")
 @export var restitution_base: float = 0.6       ## e_base in e_n(|v_n|)
+@export var variable_restitution_enabled: bool = true   ## e_n(v_n) = e_base · exp(-|v_n|/v_ref)
+@export var cross_2002_enabled: bool = true     ## Use the Cross-2002 spin
+                                                ## transfer model at hard bounces.
+                                                ## Falls back to the simple
+                                                ## tangent-dampening bounce when off.
 @export var friction: float = 0.3               ## tangential slip loss applied
-                                                ## ONLY at hard bounces (see
-                                                ## BallPhysics.BOUNCE_SIGNAL_MIN_SPEED).
-                                                ## Soft / rolling contacts use
-                                                ## `rolling_friction_coeff` instead.
+                                                ## ONLY at hard bounces when the
+                                                ## simple bounce model is selected.
+                                                ## Cross-2002 uses bounce_mu_s.
 @export var rolling_friction_coeff: float = 0.3 ## μ_r, dimensionless. Decel of a
                                                 ## rolling ball is μ_r·g (m/s²). 0.3
                                                 ## on dry natural grass produces
@@ -51,7 +55,14 @@ extends Resource
                                                      ## the 2D position sample)
 @export var restitution_v_ref: float = 8.0      ## v_ref in exp decay (Sprint 3)
 @export var bounce_e_t: float = 0.5             ## Cross 2002 tangential restitution
-@export var bounce_mu_s: float = 0.4            ## Cross 2002 static friction
+@export var bounce_mu_s: float = 0.4            ## Cross 2002 static friction (dry)
+@export_group("Surface")
+@export var surface_wet: bool = false           ## global toggle (Sprint 3); Sprint 4+
+                                                ## may add per-zone surfaces
+@export var bounce_mu_s_wet: float = 0.22       ## ~half of dry on wet grass
+@export var rolling_friction_wet: float = 0.15  ## ~half of dry rolling
+@export var restitution_base_wet: float = 0.55  ## slightly absorbent vs dry
+@export var grass_roughness_kick_wet: float = 0.5 ## wet turf is smoother
 
 # ---- Magnus (activated in Sprint 2) --------------------------------------
 @export_group("Magnus")
