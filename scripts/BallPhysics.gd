@@ -281,14 +281,24 @@ func _resolve_contact(v: Vector3, normal: Vector3, impact_speed: float) -> Vecto
 ## Reflect a velocity across a plane with `normal` (unit, pointing AWAY
 ## from the surface). Normal component is multiplied by `-e`, tangential
 ## component is dampened by `(1 - mu)`.
-## Sprint 1 uses constant `restitution_base` and `friction`. Sprint 3 will
-## swap these for the Cross-2002 model with velocity-dependent restitution
-## and explicit spin transfer.
+##
+## **Angle-aware restitution** (S02-A10): for a grazing impact
+## (`|v_n| / |v|` small — typical of a rasoterra) we apply a smoothstep
+## that drives the effective restitution to ~0, because in reality the
+## tiny normal component is almost entirely absorbed by the turf and
+## the ball keeps sliding/rolling instead of bouncing into the air.
+## A perpendicular impact keeps the full `restitution_base`. This is a
+## pre-emptive, simplified take on the angle dependence that Sprint 3's
+## Cross-2002 model will refine.
 func _bounce_velocity(v: Vector3, normal: Vector3) -> Vector3:
 	var v_n_scalar: float = v.dot(normal)
 	var v_normal: Vector3 = normal * v_n_scalar
 	var v_tangent: Vector3 = v - v_normal
-	var v_normal_new: Vector3 = -config.restitution_base * v_normal
+	var speed: float = v.length()
+	var sin_impact: float = 0.0 if speed < 1e-3 else absf(v_n_scalar) / speed
+	var angle_factor: float = smoothstep(0.05, 0.35, sin_impact)
+	var e_eff: float = config.restitution_base * angle_factor
+	var v_normal_new: Vector3 = -e_eff * v_normal
 	var v_tangent_new: Vector3 = v_tangent * (1.0 - config.friction)
 	return v_normal_new + v_tangent_new
 

@@ -40,9 +40,12 @@ extends Resource
                                                      ## and bumps don't fire
 @export var grass_roughness_threshold: float = 0.30  ## noise output > this triggers
                                                      ## a micro-bump on rising edge
-@export var grass_roughness_kick: float = 1.6        ## m/s vertical kick at full
+@export var grass_roughness_kick: float = 0.9        ## m/s vertical kick at full
                                                      ## speed (linearly scaled by
-                                                     ## (v_t - min_speed) / 20)
+                                                     ## (v_t - min_speed) / 20).
+                                                     ## At v_t = 25 m/s peak height
+                                                     ## ~4 cm, matching the user
+                                                     ## "rasoterra max ~4 cm" target
 @export var grass_roughness_frequency: float = 0.6   ## bumps per metre of travel
                                                      ## (FastNoiseLite frequency on
                                                      ## the 2D position sample)
