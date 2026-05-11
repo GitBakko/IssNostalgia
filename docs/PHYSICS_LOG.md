@@ -119,6 +119,8 @@ _(to be populated during implementation)_
 | 2026-05-11 | T03    | Ground + walls bounce                  | 5 bounces from y=8, e_effective ~0.59 vs target 0.60 (drag loss) |
 | 2026-05-11 | T04    | GUT 4/4 PASS                           | Terminal v 19.633 vs 19.634; no tunneling at 50 m/s |
 | 2026-05-11 | T05    | Launcher + HUD                         | SPACE / H / R / LMB key map + on-screen telemetry. Ball spawn moved to (0, 1.5, 0) — quick reset cadence |
+| 2026-05-11 | T05.1  | Rolling resistance separated           | `friction` (impact) vs `rolling_friction_coeff` (continuous). H-key launch now rolls ~35 m. GUT 4/4 still PASS |
+| 2026-05-11 | T06    | Sprint 01 closeout, merge to main      | All Exit Criteria validated. Tag `v0.1.0-sprint01` |
 
 ### Sprint 01 Exit Criteria
 
@@ -127,7 +129,7 @@ _(to be populated during implementation)_
 | 1 | Vertical-launched ball bounces with correct decay                        | DONE     | T03 bounce log: 8.36 → 4.88 → 2.88 → 1.71 → 1.02 m/s, ratio ≈ 0.59 (target e = 0.6, drag loss ≈ 3%) |
 | 2 | Horizontal-launched ball decelerates visibly from drag                   | DONE     | T05 HUD speedometer + T04 terminal-velocity test (19.633 ≈ 19.634 m/s closed-form, rel.err 0.0000) |
 | 3 | Spin visible on ball axis                                                | DONE     | Pentagons SVG texture + angular kinematic update in custom integrator (S01-A12/A13) |
-| 4 | FPS stable ≥ 60 in editor                                                | TO VERIFY | Visual confirmation pending (headless cannot report fps); 120 Hz physics tick measured with no skipped steps |
+| 4 | FPS stable ≥ 60 in editor                                                | DONE     | User confirmed in editor: FPS ≥ 60 across drop, vertical / horizontal launches, ground-click lob, reset cycle |
 
 ---
 
