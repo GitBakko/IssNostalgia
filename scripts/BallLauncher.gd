@@ -10,7 +10,7 @@ extends Node3D
 ## Sprint 2 will hand the launcher the predicted trajectory overlay and a
 ## proper sidespin / topspin / rifling decomposition.
 
-@export var spawn_position: Vector3 = Vector3(0.0, 1.5, 0.0)
+@export var spawn_position: Vector3 = Vector3(0.0, 0.11, 0.0)  ## resting on ground
 @export var ball_path: NodePath
 
 @export_group("Defaults")
@@ -49,33 +49,41 @@ func reset_ball() -> void:
 	print("[launcher] reset to %s" % spawn_position)
 
 
-## Primitive launch: teleport ball to spawn, apply linear+angular velocity.
-## Resets the ball's knuckle noise clock so replays from the same shot
-## are deterministic.
+## Primitive launch: apply linear + angular velocity at the ball's
+## CURRENT position. Use `reset_ball()` separately if you want to
+## also reposition. Resets the knuckle noise clock so the shot
+## replays deterministically from its own t = 0.
 func launch(velocity: Vector3, spin: Vector3 = Vector3.ZERO) -> void:
 	if _ball == null:
 		return
-	_ball.global_position = spawn_position
 	_ball.linear_velocity = velocity
 	_ball.angular_velocity = spin
 	if _ball.has_method("reset_knuckle_clock"):
 		_ball.reset_knuckle_clock()
-	print("[launcher] launch v=%s |v|=%.2f m/s spin=%s |w|=%.2f rad/s" % [
-		velocity, velocity.length(), spin, spin.length(),
+	print("[launcher] launch from %s v=%s |v|=%.2f m/s spin=%s |w|=%.2f rad/s" % [
+		_ball.global_position, velocity, velocity.length(), spin, spin.length(),
 	])
 
 
 ## Decompose a per-axis spin specification (topspin, sidespin, rifling)
 ## around the launch direction into a world-space ω vector.
-##   topspin >0  → rotation around (direction × UP), i.e. ball rolls
-##                  forward in flight; <0 = backspin
-##   sidespin >0 → rotation around world UP, curves the ball to the
-##                  left of its direction of motion (for +X dir → -Z)
+##   topspin >0  → top of the ball rolls FORWARD along the direction
+##                 of motion, producing a downward Magnus force (the
+##                 ball dives — exactly what a "rasoterra forte" wants).
+##                 <0 = backspin → lifts the ball.
+##   sidespin >0 → rotation around world UP, curves the ball laterally
+##                 (Magnus = ω̂ × v̂ → for +X motion the curve is -Z).
 ##   rifling >0  → rotation around the direction of motion itself
+##                 (no Magnus contribution; pure visual rifling).
+##
+## Right-hand rule sanity check: for `dir = +X`,
+## `top_axis = UP.cross(dir) = (0,1,0) × (1,0,0) = (0,0,-1)`. Positive
+## topspin → ω = (0, 0, -topspin), Magnus = (0,0,-1) × (1,0,0) = (0,-1,0)
+## = DOWN, which is the textbook topspin behaviour.
 static func compose_spin(direction: Vector3, topspin: float,
 		sidespin: float, rifling: float = 0.0) -> Vector3:
 	var dir: Vector3 = direction.normalized()
-	var top_axis: Vector3 = dir.cross(Vector3.UP)
+	var top_axis: Vector3 = Vector3.UP.cross(dir)
 	if top_axis.length_squared() < 1e-6:
 		top_axis = Vector3.BACK   # fallback when dir is vertical
 	top_axis = top_axis.normalized()
@@ -108,11 +116,14 @@ func launch_dead_leaf() -> void:
 	launch_at_angle(Vector3.RIGHT, 22.0, 20.0, spin)
 
 
-## Rasoterra forte: 30 m/s @ 3° low arc, topspin 4 rad/s.
-## Target: low bounce that "accelerates forward" on topspin contact.
+## Rasoterra forte: 30 m/s @ 1° low arc, topspin 4 rad/s.
+## The 1° elevation keeps the launch flat (bottom-of-ball stays within
+## ~1.5 cm of the ground); the topspin gives a downward Magnus force
+## that helps the ball glue to the surface. Subsequent micro-bumps
+## come from the grass-roughness noise stream.
 func launch_grounder_topspin() -> void:
 	var spin: Vector3 = compose_spin(Vector3.RIGHT, 4.0, 0.0, 0.0)
-	launch_at_angle(Vector3.RIGHT, 30.0, 3.0, spin)
+	launch_at_angle(Vector3.RIGHT, 30.0, 1.0, spin)
 
 
 ## Knuckleball: 28 m/s @ 10°, near-zero spin so the Simplex noise
@@ -144,17 +155,18 @@ func launch_horizontal(speed: float = -1.0, direction: Vector3 = Vector3.RIGHT,
 ## refine.
 func launch_to_point(target_xz: Vector3, speed: float = -1.0,
 		arc_height: float = -1.0) -> void:
+	if _ball == null:
+		return
 	var s: float = speed if speed > 0.0 else ground_click_speed
 	var h: float = arc_height if arc_height > 0.0 else ground_click_arc_height
-	var horizontal: Vector3 = Vector3(target_xz.x - spawn_position.x, 0.0,
-		target_xz.z - spawn_position.z)
+	var origin: Vector3 = _ball.global_position
+	var horizontal: Vector3 = Vector3(target_xz.x - origin.x, 0.0,
+		target_xz.z - origin.z)
 	var dist: float = horizontal.length()
 	if dist < 0.001:
 		return
 	var dir: Vector3 = horizontal / dist
-	# Vertical speed that produces apex at +h above spawn (ignoring drag).
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var v_horizontal: float = s
-	# Mild sidespin for visual interest (no Magnus this sprint).
 	var spin_axis: Vector3 = Vector3.UP.cross(dir).normalized()
 	launch(dir * v_horizontal + Vector3.UP * v_vertical, spin_axis * 5.0)

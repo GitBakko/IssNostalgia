@@ -4,4 +4,4 @@
 
 [node name="BallLauncher" type="Node3D"]
 script = ExtResource("1_launcher")
-spawn_position = Vector3(0, 1.5, 0)
+spawn_position = Vector3(0, 0.11, 0)

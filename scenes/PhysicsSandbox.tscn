@@ -26,7 +26,7 @@ script = ExtResource("1_controller")
 [node name="Field" parent="." instance=ExtResource("2_field")]
 
 [node name="Ball" parent="." instance=ExtResource("3_ball")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
 initial_velocity = Vector3(0, 0, 0)
 initial_angular_velocity = Vector3(0, 0, 0)
 
@@ -51,10 +51,10 @@ SPACE   vertical          (15 m/s, light spin)
 H       horizontal +X     (20 m/s, topspin)
 1       Tiro a giro       (25 m/s @15°, sidespin 8, topspin 2)
 2       Foglia morta      (22 m/s @20°, backspin 6, sidespin 3)
-3       Rasoterra forte   (30 m/s @3°,  topspin 4)
+3       Rasoterra forte   (30 m/s @1°,  topspin 4)
 4       Knuckleball       (28 m/s @10°, ~zero spin)
 LMB     lob to ground point
-R       reset to spawn
+R       reset to spawn (ground)
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD"]
