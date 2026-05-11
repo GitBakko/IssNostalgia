@@ -148,16 +148,21 @@ func launch_horizontal(speed: float = -1.0, direction: Vector3 = Vector3.RIGHT,
 	launch(dir * v, spin_axis * ts)
 
 
-## Aim the ball at `target_xz` (point on the ground plane) with a fixed
-## launch speed and an arc height. Computes a simple ballistic vertical
-## component that ignores drag — Sprint 1 only, Sprint 2 predictor will
-## refine.
-func launch_to_point(target_xz: Vector3, speed: float = -1.0,
-		arc_height: float = -1.0) -> void:
+## Aim the ball at `target_xz` (point on the ground plane). The arc
+## height scales with launch distance (clamped to `[0.5 m, 6 m]`); the
+## horizontal speed is then derived from the closed-form ballistic
+## solution so the ball actually lands at the target. Drag and Magnus
+## are ignored here — close enough for sandbox lobs at moderate speeds.
+##
+## Spin is set to ZERO. A naïve "topspin lob" (S02-A12 fallback) caused
+## Magnus to pull the ball backwards during descent: with ω̂ = (0,0,-1)
+## and v̂ pointing down-and-forward, ω̂ × v̂ produces a negative-X
+## component, decelerating and even reversing forward motion. A
+## spinless lob lands cleanly on the click.
+func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
+		arc_height_override: float = -1.0) -> void:
 	if _ball == null:
 		return
-	var s: float = speed if speed > 0.0 else ground_click_speed
-	var h: float = arc_height if arc_height > 0.0 else ground_click_arc_height
 	var origin: Vector3 = _ball.global_position
 	var horizontal: Vector3 = Vector3(target_xz.x - origin.x, 0.0,
 		target_xz.z - origin.z)
@@ -165,7 +170,8 @@ func launch_to_point(target_xz: Vector3, speed: float = -1.0,
 	if dist < 0.001:
 		return
 	var dir: Vector3 = horizontal / dist
+	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.25, 0.5, 6.0)
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
-	var v_horizontal: float = s
-	var spin_axis: Vector3 = Vector3.UP.cross(dir).normalized()
-	launch(dir * v_horizontal + Vector3.UP * v_vertical, spin_axis * 5.0)
+	var t_flight: float = 2.0 * v_vertical / 9.81
+	var v_horizontal: float = dist / t_flight
+	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)
