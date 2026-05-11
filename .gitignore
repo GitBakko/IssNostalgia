@@ -52,6 +52,10 @@ dist/
 *.log
 tests/last_run.log
 
+# Local screenshots (validation artifacts, not source)
+t*_screenshot.png
+screenshots/
+
 # Backups (runtime-generated, not source)
 resources/backups/*.tres
 !resources/backups/.gdkeep
