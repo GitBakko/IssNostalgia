@@ -26,6 +26,7 @@ var _screenshot_frames_left: int = 0
 func _ready() -> void:
 	_setup_camera()
 	_setup_screenshot_from_cli()
+	_connect_ball_signals()
 	print("[Sandbox] ready — IssNostalgia Phase 1, Sprint 01 T01")
 	print("[Sandbox] field: 105 x 68 m, FIFA regulation")
 	print("[Sandbox] physics tick: %d Hz" % Engine.physics_ticks_per_second)
@@ -41,6 +42,18 @@ func _setup_camera() -> void:
 	_camera.global_position = camera_position
 	_camera.look_at(camera_target, Vector3.UP)
 	_camera.fov = camera_fov_degrees
+
+
+func _connect_ball_signals() -> void:
+	var ball: Node = get_node_or_null("Ball")
+	if ball == null:
+		return
+	if ball.has_signal("bounced"):
+		ball.connect("bounced", _on_ball_bounced)
+
+
+func _on_ball_bounced(impact_speed: float, normal: Vector3, position: Vector3) -> void:
+	print("[bounce] speed=%.2f m/s normal=%s pos=%s" % [impact_speed, normal, position])
 
 
 func _setup_screenshot_from_cli() -> void:

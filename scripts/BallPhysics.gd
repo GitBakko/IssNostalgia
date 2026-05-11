@@ -23,6 +23,24 @@ const SPEED_THRESHOLD_MID: float = 15.0
 const SPEED_THRESHOLD_HIGH: float = 25.0
 const MIN_SPEED_FOR_DRAG: float = 0.001
 
+# ---- Static world geometry (Sprint 1 axis-aligned containment) ------------
+# Ground plane at y = 0. Perimeter walls form an AABB just outside the
+# regulation pitch (105 x 68 m, half-extents 52.5 x 34) with a 5 m runoff.
+# Sprint 5 will revisit when arbitrary obstacles enter the scene.
+const GROUND_Y: float = 0.0
+const FIELD_HALF_X: float = 52.5
+const FIELD_HALF_Z: float = 34.0
+const WALL_BUFFER: float = 5.0
+const WALL_MAX_X: float = FIELD_HALF_X + WALL_BUFFER
+const WALL_MAX_Z: float = FIELD_HALF_Z + WALL_BUFFER
+
+# Below this normal-impact speed (m/s) we treat the contact as rolling /
+# resting rather than a bounce, so we don't emit a `bounced` signal for
+# every micro-jitter. Audio (Sprint 3) will use the same threshold.
+const BOUNCE_SIGNAL_MIN_SPEED: float = 0.8
+
+signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
+
 @export var config: PhysicsConfig
 @export var initial_velocity: Vector3 = Vector3.ZERO
 @export var initial_angular_velocity: Vector3 = Vector3.ZERO
@@ -78,10 +96,22 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	var v: Vector3 = state.linear_velocity
 	var p: Vector3 = state.transform.origin
-	var next: Dictionary = integrate_step_pure(p, v, sub_dt)
-	state.linear_velocity = next.velocity
+	var step: Dictionary = integrate_step_pure(p, v, sub_dt)
+	p = step.position
+	v = step.velocity
+
+	# Resolve static-world collision (ground + perimeter walls).
+	var collision: Dictionary = resolve_static_collisions(p, v)
+	if collision.collided:
+		p = collision.position
+		v = collision.velocity
+		if collision.impact_speed >= BOUNCE_SIGNAL_MIN_SPEED:
+			bounced.emit(collision.impact_speed, collision.normal, p)
+
+	state.linear_velocity = v
 	var t: Transform3D = state.transform
-	t.origin = next.position
+	t.origin = p
+
 	# Angular kinematic update. Sprint 1 applies no torques, so spin is
 	# constant unless modified externally; but with `custom_integrator=true`
 	# Godot does NOT auto-rotate the transform from `angular_velocity`, we
@@ -94,6 +124,96 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 		var angle: float = omega.length() * sub_dt
 		t.basis = Basis(axis, angle) * t.basis
 	state.transform = t
+
+
+## Resolve collisions against the (axis-aligned) static world: ground plane
+## and the four perimeter walls. Returns a Dictionary with keys:
+##   collided     (bool)
+##   position     (Vector3, corrected to keep the ball outside the surface)
+##   velocity     (Vector3, after bounce + tangential friction)
+##   impact_speed (float, |v_normal| at impact, used for audio + telemetry)
+##   normal       (Vector3, surface normal of the dominant contact)
+## Pure function — no engine state, safe to reuse in tests and predictor.
+func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
+	var r: float = config.ball_radius
+	var p: Vector3 = p_in
+	var v: Vector3 = v_in
+	var collided: bool = false
+	var impact_speed: float = 0.0
+	var impact_normal: Vector3 = Vector3.ZERO
+
+	# Ground (normal = +Y)
+	if p.y < GROUND_Y + r and v.y < 0.0:
+		var vn: float = -v.y
+		if vn > impact_speed:
+			impact_speed = vn
+			impact_normal = Vector3.UP
+		p.y = GROUND_Y + r
+		v = _bounce_velocity(v, Vector3.UP)
+		collided = true
+
+	# East wall (x = +WALL_MAX_X, normal = -X)
+	if p.x > WALL_MAX_X - r and v.x > 0.0:
+		var vn: float = v.x
+		if vn > impact_speed:
+			impact_speed = vn
+			impact_normal = Vector3.LEFT
+		p.x = WALL_MAX_X - r
+		v = _bounce_velocity(v, Vector3.LEFT)
+		collided = true
+
+	# West wall (x = -WALL_MAX_X, normal = +X)
+	if p.x < -WALL_MAX_X + r and v.x < 0.0:
+		var vn: float = -v.x
+		if vn > impact_speed:
+			impact_speed = vn
+			impact_normal = Vector3.RIGHT
+		p.x = -WALL_MAX_X + r
+		v = _bounce_velocity(v, Vector3.RIGHT)
+		collided = true
+
+	# North wall (z = -WALL_MAX_Z, normal = +Z = Vector3.BACK)
+	if p.z < -WALL_MAX_Z + r and v.z < 0.0:
+		var vn: float = -v.z
+		if vn > impact_speed:
+			impact_speed = vn
+			impact_normal = Vector3.BACK
+		p.z = -WALL_MAX_Z + r
+		v = _bounce_velocity(v, Vector3.BACK)
+		collided = true
+
+	# South wall (z = +WALL_MAX_Z, normal = -Z = Vector3.FORWARD)
+	if p.z > WALL_MAX_Z - r and v.z > 0.0:
+		var vn: float = v.z
+		if vn > impact_speed:
+			impact_speed = vn
+			impact_normal = Vector3.FORWARD
+		p.z = WALL_MAX_Z - r
+		v = _bounce_velocity(v, Vector3.FORWARD)
+		collided = true
+
+	return {
+		"collided": collided,
+		"position": p,
+		"velocity": v,
+		"impact_speed": impact_speed,
+		"normal": impact_normal,
+	}
+
+
+## Reflect a velocity across a plane with `normal` (unit, pointing AWAY
+## from the surface). Normal component is multiplied by `-e`, tangential
+## component is dampened by `(1 - mu)`.
+## Sprint 1 uses constant `restitution_base` and `friction`. Sprint 3 will
+## swap these for the Cross-2002 model with velocity-dependent restitution
+## and explicit spin transfer.
+func _bounce_velocity(v: Vector3, normal: Vector3) -> Vector3:
+	var v_n_scalar: float = v.dot(normal)
+	var v_normal: Vector3 = normal * v_n_scalar
+	var v_tangent: Vector3 = v - v_normal
+	var v_normal_new: Vector3 = -config.restitution_base * v_normal
+	var v_tangent_new: Vector3 = v_tangent * (1.0 - config.friction)
+	return v_normal_new + v_tangent_new
 
 
 ## Pure-function integrator. Given a position/velocity, returns the next
