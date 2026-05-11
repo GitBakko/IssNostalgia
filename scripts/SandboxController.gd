@@ -16,9 +16,12 @@ extends Node3D
 ## Debug: capture a single screenshot and quit. Triggered by `--capture-screenshot` CLI arg.
 const SCREENSHOT_FLAG := "--capture-screenshot"
 const SCREENSHOT_DEFAULT_PATH := "user://t01_screenshot.png"
+const AUTO_LAUNCH_FLAG := "--auto-launch"
 var _screenshot_pending: bool = false
 var _screenshot_path: String = ""
 var _screenshot_frames_left: int = 0
+var _auto_launch_kind: String = ""
+var _auto_launch_frames_left: int = -1
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _ball: RigidBody3D = $Ball as RigidBody3D
@@ -79,10 +82,19 @@ func _setup_screenshot_from_cli() -> void:
 		print("[Sandbox] screenshot pending: %s (after %d frames)" % [
 			_screenshot_path, _screenshot_frames_left,
 		])
+	if AUTO_LAUNCH_FLAG in args:
+		var li: int = args.find(AUTO_LAUNCH_FLAG)
+		if li + 1 < args.size():
+			_auto_launch_kind = args[li + 1]
+			_auto_launch_frames_left = 5
+			print("[Sandbox] auto-launch scheduled: '%s' in %d frames" % [
+				_auto_launch_kind, _auto_launch_frames_left,
+			])
 
 
 func _process(_delta: float) -> void:
 	_update_telemetry()
+	_tick_auto_launch()
 	if not _screenshot_pending:
 		return
 	if _screenshot_frames_left > 0:
@@ -93,6 +105,26 @@ func _process(_delta: float) -> void:
 			])
 		return
 	_capture_screenshot()
+
+
+func _tick_auto_launch() -> void:
+	if _auto_launch_frames_left < 0:
+		return
+	if _auto_launch_frames_left > 0:
+		_auto_launch_frames_left -= 1
+		return
+	_auto_launch_frames_left = -1
+	if _launcher == null:
+		return
+	match _auto_launch_kind:
+		"vertical":
+			_launcher.launch_vertical()
+		"horizontal":
+			_launcher.launch_horizontal()
+		"reset":
+			_launcher.reset_ball()
+		_:
+			push_warning("Unknown --auto-launch kind: %s" % _auto_launch_kind)
 
 
 func _update_telemetry() -> void:

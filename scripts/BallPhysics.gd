@@ -34,10 +34,22 @@ const WALL_BUFFER: float = 5.0
 const WALL_MAX_X: float = FIELD_HALF_X + WALL_BUFFER
 const WALL_MAX_Z: float = FIELD_HALF_Z + WALL_BUFFER
 
-# Below this normal-impact speed (m/s) we treat the contact as rolling /
-# resting rather than a bounce, so we don't emit a `bounced` signal for
-# every micro-jitter. Audio (Sprint 3) will use the same threshold.
+# Normal-impact speed cut-off (m/s) that separates a real bounce
+# from a soft / resting contact.
+#   |v_n| >= threshold  → bounce: reflect normal × (-e), dampen tangent × (1-μ)
+#                          and emit the `bounced` signal
+#   |v_n| <  threshold  → soft contact: kill the normal component, leave the
+#                          tangent untouched (rolling friction handles it
+#                          continuously inside _integrate_substep)
 const BOUNCE_SIGNAL_MIN_SPEED: float = 0.8
+
+# A ball is considered "rolling on the ground" — and therefore subject to
+# rolling resistance — when it sits within this height tolerance of the
+# resting altitude (ground + radius) AND its vertical speed is below the
+# vertical-rolling tolerance. Both are kept small so that a ball mid-bounce
+# is never treated as rolling.
+const ROLLING_HEIGHT_TOL: float = 5e-3   # m above resting altitude
+const ROLLING_VY_TOL: float = 0.5        # m/s
 
 signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
 
@@ -108,6 +120,9 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 		if collision.impact_speed >= BOUNCE_SIGNAL_MIN_SPEED:
 			bounced.emit(collision.impact_speed, collision.normal, p)
 
+	# Rolling resistance (continuous, ground-contact only).
+	v = apply_rolling_resistance(p, v, sub_dt)
+
 	state.linear_velocity = v
 	var t: Transform3D = state.transform
 	t.origin = p
@@ -149,7 +164,7 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.UP
 		p.y = GROUND_Y + r
-		v = _bounce_velocity(v, Vector3.UP)
+		v = _resolve_contact(v, Vector3.UP, vn)
 		collided = true
 
 	# East wall (x = +WALL_MAX_X, normal = -X)
@@ -159,7 +174,7 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.LEFT
 		p.x = WALL_MAX_X - r
-		v = _bounce_velocity(v, Vector3.LEFT)
+		v = _resolve_contact(v, Vector3.LEFT, vn)
 		collided = true
 
 	# West wall (x = -WALL_MAX_X, normal = +X)
@@ -169,7 +184,7 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.RIGHT
 		p.x = -WALL_MAX_X + r
-		v = _bounce_velocity(v, Vector3.RIGHT)
+		v = _resolve_contact(v, Vector3.RIGHT, vn)
 		collided = true
 
 	# North wall (z = -WALL_MAX_Z, normal = +Z = Vector3.BACK)
@@ -179,7 +194,7 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.BACK
 		p.z = -WALL_MAX_Z + r
-		v = _bounce_velocity(v, Vector3.BACK)
+		v = _resolve_contact(v, Vector3.BACK, vn)
 		collided = true
 
 	# South wall (z = +WALL_MAX_Z, normal = -Z = Vector3.FORWARD)
@@ -189,7 +204,7 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 			impact_speed = vn
 			impact_normal = Vector3.FORWARD
 		p.z = WALL_MAX_Z - r
-		v = _bounce_velocity(v, Vector3.FORWARD)
+		v = _resolve_contact(v, Vector3.FORWARD, vn)
 		collided = true
 
 	return {
@@ -199,6 +214,24 @@ func resolve_static_collisions(p_in: Vector3, v_in: Vector3) -> Dictionary:
 		"impact_speed": impact_speed,
 		"normal": impact_normal,
 	}
+
+
+## Resolve a single contact against a plane.
+##   `normal`         — unit vector pointing AWAY from the surface
+##   `impact_speed`   — |v_normal| BEFORE the contact (always positive)
+## For impact_speed >= BOUNCE_SIGNAL_MIN_SPEED we treat this as a real
+## bounce and apply `_bounce_velocity` (normal × -e, tangent × (1-μ)).
+## For softer / resting contacts we only kill the normal component; the
+## tangential component is preserved here and decayed continuously by
+## `apply_rolling_resistance` in the next substep. This is what fixes
+## the unrealistically fast horizontal slow-down that showed up the
+## first time T05 was tested with the H key.
+func _resolve_contact(v: Vector3, normal: Vector3, impact_speed: float) -> Vector3:
+	if impact_speed >= BOUNCE_SIGNAL_MIN_SPEED:
+		return _bounce_velocity(v, normal)
+	# Soft contact: cancel the incoming normal component only.
+	var v_n_scalar: float = v.dot(normal)
+	return v - normal * v_n_scalar
 
 
 ## Reflect a velocity across a plane with `normal` (unit, pointing AWAY
@@ -214,6 +247,34 @@ func _bounce_velocity(v: Vector3, normal: Vector3) -> Vector3:
 	var v_normal_new: Vector3 = -config.restitution_base * v_normal
 	var v_tangent_new: Vector3 = v_tangent * (1.0 - config.friction)
 	return v_normal_new + v_tangent_new
+
+
+## Continuous rolling resistance. Applies an opposing-to-motion deceleration
+## of `μ_r · g` to the horizontal velocity ONLY when the ball is in ground
+## contact at near-zero vertical speed. Pure function: takes (position,
+## velocity, sub_dt) and returns the new velocity.
+##
+## This is the right place for the slow-down that real grass produces on a
+## rolling soccer ball; the per-bounce tangential `friction` term only fires
+## on hard bounces (slip loss at impact), preventing the compounding
+## per-substep dampening that made horizontal launches die unrealistically
+## fast.
+func apply_rolling_resistance(p: Vector3, v: Vector3, sub_dt: float) -> Vector3:
+	if config.rolling_friction_coeff <= 0.0:
+		return v
+	var r: float = config.ball_radius
+	if p.y > GROUND_Y + r + ROLLING_HEIGHT_TOL:
+		return v
+	if absf(v.y) > ROLLING_VY_TOL:
+		return v
+	var v_t: Vector3 = Vector3(v.x, 0.0, v.z)
+	var speed_t: float = v_t.length()
+	if speed_t < 1e-4:
+		return v
+	var decel: float = config.rolling_friction_coeff * config.gravity
+	var dv: float = min(decel * sub_dt, speed_t)
+	var scale: float = (speed_t - dv) / speed_t
+	return Vector3(v_t.x * scale, v.y, v_t.z * scale)
 
 
 ## Pure-function integrator. Given a position/velocity, returns the next
