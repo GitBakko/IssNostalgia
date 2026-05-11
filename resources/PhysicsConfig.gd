@@ -34,6 +34,18 @@ extends Resource
                                                 ## on dry natural grass produces
                                                 ## a ~2.9 m/s² deceleration: a 20 m/s
                                                 ## roll covers ~68 m before stopping
+@export var grass_roughness_enabled: bool = true
+@export var grass_roughness_min_speed: float = 5.0   ## m/s of tangential speed
+                                                     ## below which grass is "still"
+                                                     ## and bumps don't fire
+@export var grass_roughness_threshold: float = 0.30  ## noise output > this triggers
+                                                     ## a micro-bump on rising edge
+@export var grass_roughness_kick: float = 1.6        ## m/s vertical kick at full
+                                                     ## speed (linearly scaled by
+                                                     ## (v_t - min_speed) / 20)
+@export var grass_roughness_frequency: float = 0.6   ## bumps per metre of travel
+                                                     ## (FastNoiseLite frequency on
+                                                     ## the 2D position sample)
 @export var restitution_v_ref: float = 8.0      ## v_ref in exp decay (Sprint 3)
 @export var bounce_e_t: float = 0.5             ## Cross 2002 tangential restitution
 @export var bounce_mu_s: float = 0.4            ## Cross 2002 static friction
@@ -52,18 +64,17 @@ extends Resource
                                                       ## |ω| below this
 @export var knuckle_threshold_speed: float = 15.0     ## m/s — gate, only when
                                                       ## |v| above this
-@export var knuckle_amplitude: float = 5.0            ## m/s² — peak transverse
-                                                      ## acceleration (Asai et al.
-                                                      ## measured ~10 N at 30 m/s
-                                                      ## → ~23 m/s² on 0.43 kg;
-                                                      ## 5 m/s² is a calibrated
-                                                      ## DRAFT for arcade feel)
-@export var knuckle_seed: int = 1337                  ## Simplex seed — replays
-                                                      ## with the same seed must
-                                                      ## produce bytewise-identical
-                                                      ## perturbation
-@export var knuckle_noise_frequency: float = 1.0      ## sample rate of the
-                                                      ## underlying Simplex
-                                                      ## (peaks per simulated
-                                                      ## second, ≈ effective
-                                                      ## oscillation freq)
+@export var knuckle_amplitude: float = 8.0            ## m/s² peak smooth wobble
+                                                      ## (Asai et al. measured ~10 N
+                                                      ## at 30 m/s → ~23 m/s² on a
+                                                      ## 0.43 kg ball; 8 is the
+                                                      ## tunable arcade DRAFT)
+@export var knuckle_seed: int = 1337                  ## Simplex seed
+@export var knuckle_noise_frequency: float = 1.2      ## base wobble freq (peaks/s)
+@export var knuckle_spike_frequency_mul: float = 4.5  ## spike layer freq = base × this
+@export var knuckle_spike_threshold: float = 0.45     ## |spike noise| > this triggers
+                                                      ## a transient boost (the "snap"
+                                                      ## events that make the ball
+                                                      ## suddenly veer in real life)
+@export var knuckle_spike_amplitude_mul: float = 1.8  ## extra acceleration multiplier
+                                                      ## applied above threshold
