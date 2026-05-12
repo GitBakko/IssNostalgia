@@ -63,21 +63,22 @@ func test_cross_backspin_loses_forward_speed() -> void:
 	assert_gt(v_out.y, 0.0, "Outgoing y must be positive (ball leaves the ground)")
 
 
-func test_cross_topspin_keeps_or_gains_forward_speed() -> void:
-	# Topspin (ω around -Z for +X motion) → contact-point velocity is
-	# REDUCED relative to v_t (or even reversed). Friction at contact
-	# opposes a smaller (or backwards) v_c, so the linear forward speed
-	# is barely reduced — and with strong topspin can even gain.
+func test_cross_topspin_retains_more_than_nospin() -> void:
+	# Topspin (ω around -Z for +X motion) reduces v_c at the contact
+	# point, so the bounce dissipation is proportionally smaller and the
+	# ball retains MORE forward speed than the no-spin baseline.
+	# Re-stated for S05-A02: the old "≥ 95 %" assertion no longer holds
+	# because the Cross-2014 surface compliance + retention clamp now
+	# dissipate horizontal energy on every bounce. The qualitative
+	# relationship (topspin > no-spin) is still the load-bearing claim.
 	cfg.cross_2002_enabled = true
 	var v_in: Vector3 = Vector3(20.0, -5.0, 0.0)
-	# Top axis for +X motion = (0,0,-1). Pure topspin → ω = (0,0,-k)
-	# enough that r·|ω| >> |v_t|, so v_c flips sign and friction pushes
-	# forward.
-	var omega_in: Vector3 = Vector3(0.0, 0.0, -200.0)
-	var out: Dictionary = ball._bounce_cross_2002(v_in, omega_in, Vector3.UP)
-	var v_out: Vector3 = out.velocity
-	assert_gt(v_out.x, v_in.x * 0.95,
-		"Heavy topspin should not slow the forward speed below 95%% (in %.2f, out %.2f)" % [v_in.x, v_out.x])
+	var omega_topspin: Vector3 = Vector3(0.0, 0.0, -200.0)
+	var out_topspin: Dictionary = ball._bounce_cross_2002(v_in, omega_topspin, Vector3.UP)
+	var out_nospin: Dictionary = ball._bounce_cross_2002(v_in, Vector3.ZERO, Vector3.UP)
+	assert_gt(out_topspin.velocity.x, out_nospin.velocity.x,
+		"Heavy topspin should retain more forward speed than no-spin (topspin %.2f vs no-spin %.2f)" % [
+			out_topspin.velocity.x, out_nospin.velocity.x])
 
 
 func test_cross_spin_changes_omega() -> void:

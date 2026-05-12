@@ -60,7 +60,22 @@ extends Resource
                                                 ## e ≈ 0.31 at 20 m/s — milder than the
                                                 ## locked target but visually correct
 @export var bounce_e_t: float = 0.5             ## Cross 2002 tangential restitution
+                                                ## (grip case impulse target)
 @export var bounce_mu_s: float = 0.4            ## Cross 2002 static friction (dry)
+
+# Surface-compliance tangential dissipation (S05-A02). Independent of
+# e_n / J_n — captures the grass + envelope deformation that absorbs
+# horizontal energy even on grazing impacts where Coulomb friction
+# collapses with e_n. See Cross 2014 / Carré 2004 in PHYSICS_LOG.
+@export var bounce_e_t_surface: float = 0.25    ## Cross 2014 tangential restitution
+                                                ## from surface compliance. Range
+                                                ## for grass: 0.20–0.35
+@export var bounce_t_retention_floor: float = 0.60   ## Arcade safety clamp: |v_t_out|
+                                                     ## ≤ floor · |v_t_in| at grazing
+                                                     ## impacts (angle_factor ≈ 0)
+@export var bounce_t_retention_ceil: float = 0.85    ## ...and ≤ ceil · |v_t_in| at
+                                                     ## near-normal impacts (angle ≈ 1)
+
 @export_group("Surface")
 @export var surface_wet: bool = false           ## global toggle (Sprint 3); Sprint 4+
                                                 ## may add per-zone surfaces

@@ -600,8 +600,19 @@ func _bounce_cross_2002(v: Vector3, omega: Vector3, normal: Vector3) -> Dictiona
 	# the direction opposing v_c. Hence:
 	#   J_t_grip = (1 + e_t) · |v_c| · m · k / (1 + k)
 	var J_t_grip: float = (1.0 + config.bounce_e_t) * v_c_mag * m * inertia_factor / (1.0 + inertia_factor)
-	var J_t_max: float = _mu_s() * J_n_mag
-	var J_t_mag: float = minf(J_t_grip, J_t_max)
+	var J_t_coulomb_max: float = _mu_s() * J_n_mag
+	# Cross-2014 surface-compliance tangential impulse (S05-A02). Same
+	# (1 + e_t_surface) · v_c form as the grip impulse, but using a
+	# separate e_t that represents the grass + envelope absorbing
+	# tangential energy independently of how much normal energy bounced
+	# back. On grazing impacts e_n collapses → J_n_mag tiny → Coulomb
+	# friction tiny — without this term horizontal speed survives
+	# almost untouched and the ball "skips" forward unrealistically.
+	var J_t_surface: float = (1.0 + config.bounce_e_t_surface) * v_c_mag * m * inertia_factor / (1.0 + inertia_factor)
+	# Take the LARGER of Coulomb and surface — they're alternative
+	# explanations of the same dissipation, not stackable — and cap at
+	# the full grip target (can't dissipate more than grip would).
+	var J_t_mag: float = clampf(maxf(J_t_coulomb_max, J_t_surface), 0.0, J_t_grip)
 	var J_t: Vector3 = (-v_c_t / v_c_mag) * J_t_mag
 
 	# Apply impulse.
@@ -609,6 +620,26 @@ func _bounce_cross_2002(v: Vector3, omega: Vector3, normal: Vector3) -> Dictiona
 	var v_tangent_new: Vector3 = v_tangent + dv_linear
 	var d_omega: Vector3 = r_contact.cross(J_t) / I
 	var omega_new: Vector3 = omega + d_omega
+
+	# Arcade retention clamp (S05-A02). The Cross-2014 term above is
+	# usually enough, but on edge cases (very high spin coupled with
+	# low |v_c|, or a Coulomb-only branch picked when surface compliance
+	# is configured low) the post-bounce |v_t| can still exceed the
+	# 60–85 % envelope measured for a soccer ball on grass (Carré 2004,
+	# Sports Engineering 7:113). Hard-clamp the tangential magnitude as
+	# a function of incidence angle:
+	#   grazing (sin_impact ≈ 0)  → floor (default 0.60)
+	#   near-normal (sin_impact ≥ 0.35) → ceil  (default 0.85)
+	var v_t_in_mag: float = v_tangent.length()
+	var v_t_out_mag: float = v_tangent_new.length()
+	if v_t_in_mag > 1e-6 and v_t_out_mag > 1e-6:
+		var max_retention: float = lerpf(
+			config.bounce_t_retention_floor,
+			config.bounce_t_retention_ceil,
+			angle_factor)
+		var max_v_t_out: float = v_t_in_mag * max_retention
+		if v_t_out_mag > max_v_t_out:
+			v_tangent_new = v_tangent_new * (max_v_t_out / v_t_out_mag)
 
 	return {
 		"velocity": v_normal_new + v_tangent_new,
