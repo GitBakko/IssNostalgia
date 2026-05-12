@@ -5,6 +5,8 @@
 [ext_resource type="PackedScene" path="res://scenes/Ball.tscn" id="3_ball"]
 [ext_resource type="PackedScene" path="res://scenes/BallLauncher.tscn" id="4_launcher"]
 [ext_resource type="PackedScene" path="res://scenes/TrajectoryVisualizer.tscn" id="5_traj"]
+[ext_resource type="PackedScene" path="res://scenes/PhysicsDebugUI.tscn" id="6_debug"]
+[ext_resource type="PackedScene" path="res://scenes/ForceGizmo.tscn" id="7_gizmo"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -31,6 +33,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
 [node name="TrajectoryVisualizer" parent="." unique_id=1016011643 instance=ExtResource("5_traj")]
 ball_path = NodePath("../Ball")
 
+[node name="PhysicsDebugUI" parent="." instance=ExtResource("6_debug")]
+
+[node name="ForceGizmo" parent="." instance=ExtResource("7_gizmo")]
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1055643380]
 
 [node name="Instructions" type="Label" parent="HUD" unique_id=1672820386]
@@ -53,6 +59,8 @@ LMB     lob to clicked ground point
 R       reset to spawn (ground)
 W       toggle dry / wet surface
 F5      toggle slow-motion (0.25x)
+F1      debug UI panel (sliders, presets, force readout)
+G       3D force gizmo (drag/magnus/knuckle arrows)
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD" unique_id=564516205]
