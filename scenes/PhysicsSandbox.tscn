@@ -43,7 +43,7 @@ ball_path = NodePath("../Ball")
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 700.0
-offset_bottom = 440.0
+offset_bottom = 500.0
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
@@ -63,6 +63,9 @@ F1      debug UI panel (sliders, presets, force readout)
 G       3D force gizmo
         viola=gravity  rosso=drag  verde=magnus
         giallo=knuckle  blu=grass  bianco=net (sum)
+F6      enter replay (pause + cursor at latest)
+F7/F8   replay step +1 / -1 physics tick
+F9      exit replay (resume from cursor)
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD" unique_id=564516205]
@@ -72,7 +75,7 @@ anchor_right = 1.0
 offset_left = -360.0
 offset_top = 24.0
 offset_right = -24.0
-offset_bottom = 180.0
+offset_bottom = 220.0
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4

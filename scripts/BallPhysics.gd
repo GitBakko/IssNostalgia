@@ -65,6 +65,20 @@ signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
 var _current_substeps: int = SUBSTEPS_LOW
 var _sim_time: float = 0.0
 
+# Replay (Sprint 5 T06) — ring buffer of recent physics ticks so the
+# user can pause + frame-step through a bounce sequence to diagnose
+# perceptual artefacts (e.g. the LMB lob "schizzo"). One entry per
+# physics tick (120 Hz × 5 s = 600 entries). Each entry caches the
+# full RigidBody3D state needed to restore the simulation:
+#   {t: float, position: Vector3, velocity: Vector3,
+#    angular_velocity: Vector3, basis: Basis}
+const REPLAY_BUFFER_SIZE: int = 600
+var _replay_buffer: Array = []
+var _replay_head: int = 0      ## next write index, modular
+var _replay_count: int = 0     ## number of valid entries
+var _replay_active: bool = false
+var _replay_cursor: int = 0    ## logical index 0..count-1, count-1 = newest
+
 # Telemetry — last computed force vectors (Newton). Read by the debug UI
 # and the force gizmo. Updated every physics substep.
 var last_force_gravity: Vector3 = Vector3.ZERO
@@ -238,6 +252,9 @@ func _apply_debug_visual_scale() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	if _replay_active:
+		_apply_replay_entry(state)
+		return
 	_apply_pending_state(state)
 	var dt: float = state.step
 	var speed: float = state.linear_velocity.length()
@@ -245,6 +262,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var sub_dt: float = dt / float(_current_substeps)
 	for i in _current_substeps:
 		_integrate_substep(state, sub_dt)
+	_push_replay_entry(state)
 
 
 # Commit deferred-state requests (teleport / launch) into the physics
@@ -281,6 +299,94 @@ func apply_launch_state(linear: Variant, angular: Variant = null) -> void:
 		_pending_linear = linear
 	if angular != null:
 		_pending_angular = angular
+
+
+# ---- Replay / frame-step (Sprint 5 T06) ----------------------------------
+
+## Snapshot the live state of the body into the ring buffer. Called at
+## the end of `_integrate_forces` when NOT in replay mode.
+func _push_replay_entry(state: PhysicsDirectBodyState3D) -> void:
+	var entry: Dictionary = {
+		"t": _sim_time,
+		"position": state.transform.origin,
+		"velocity": state.linear_velocity,
+		"angular_velocity": state.angular_velocity,
+		"basis": state.transform.basis,
+	}
+	if _replay_buffer.size() < REPLAY_BUFFER_SIZE:
+		_replay_buffer.append(entry)
+	else:
+		_replay_buffer[_replay_head] = entry
+	_replay_head = (_replay_head + 1) % REPLAY_BUFFER_SIZE
+	_replay_count = mini(_replay_count + 1, REPLAY_BUFFER_SIZE)
+
+
+## Translate a logical cursor (0 = oldest, count-1 = newest) into the
+## physical ring index. Returns null when the buffer is empty.
+func _replay_entry_at(logical_idx: int) -> Variant:
+	if _replay_count == 0:
+		return null
+	var idx: int = clampi(logical_idx, 0, _replay_count - 1)
+	var oldest: int = (_replay_head - _replay_count + REPLAY_BUFFER_SIZE) % REPLAY_BUFFER_SIZE
+	var physical: int = (oldest + idx) % REPLAY_BUFFER_SIZE
+	return _replay_buffer[physical]
+
+
+## Apply the entry the cursor points at to the current physics state.
+## Called instead of the substep loop while replay is active.
+func _apply_replay_entry(state: PhysicsDirectBodyState3D) -> void:
+	var entry: Variant = _replay_entry_at(_replay_cursor)
+	if entry == null:
+		return
+	var t: Transform3D = state.transform
+	t.origin = entry.position
+	t.basis = entry.basis
+	state.transform = t
+	state.linear_velocity = entry.velocity
+	state.angular_velocity = entry.angular_velocity
+
+
+## Enter replay mode. Cursor parks on the newest captured entry; the
+## integrator stops simulating new forces until `exit_replay()` is
+## called. Safe to call multiple times.
+func enter_replay() -> void:
+	if _replay_count == 0:
+		push_warning("Replay buffer empty — launch the ball first")
+		return
+	_replay_active = true
+	_replay_cursor = _replay_count - 1
+
+
+## Exit replay mode. The cursor's state stays applied as the new live
+## state — i.e. the ball "resumes" from wherever the user paused, not
+## from the snapshot taken when replay started. The buffer is left
+## intact; new ticks continue overwriting older entries.
+func exit_replay() -> void:
+	_replay_active = false
+
+
+## Step the replay cursor by `delta` ticks. Negative goes back in
+## time, positive goes forward. Clamped to the buffer extent.
+func step_replay(delta: int) -> void:
+	if not _replay_active:
+		return
+	_replay_cursor = clampi(_replay_cursor + delta, 0, _replay_count - 1)
+
+
+func is_replay_active() -> bool:
+	return _replay_active
+
+
+## How much wall-time the cursor sits behind the newest entry, in
+## seconds. Used by the HUD `[REPLAY t=-X.XX s]` indicator.
+func replay_cursor_offset_seconds() -> float:
+	if not _replay_active or _replay_count == 0:
+		return 0.0
+	var newest: Variant = _replay_entry_at(_replay_count - 1)
+	var current: Variant = _replay_entry_at(_replay_cursor)
+	if newest == null or current == null:
+		return 0.0
+	return current.t - newest.t
 
 
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:

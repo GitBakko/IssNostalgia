@@ -144,12 +144,18 @@ func _update_telemetry() -> void:
 	var speed_kmh: float = v.length() * 3.6
 	var fps: float = Engine.get_frames_per_second()
 	var phys_fps: int = Engine.physics_ticks_per_second
-	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m\nFPS       %4.0f  /  phys %d Hz" % [
+	var replay_line: String = ""
+	if _ball is BallPhysics:
+		var bp: BallPhysics = _ball as BallPhysics
+		if bp.is_replay_active():
+			replay_line = "\n[REPLAY  t=%+5.2f s]" % bp.replay_cursor_offset_seconds()
+	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m\nFPS       %4.0f  /  phys %d Hz%s" % [
 		_ball.global_position.x, _ball.global_position.y, _ball.global_position.z,
 		speed_kmh, v.length(),
 		w.length(),
 		_ball.global_position.y,
 		fps, phys_fps,
+		replay_line,
 	]
 
 
@@ -202,6 +208,14 @@ func _handle_key(event: InputEventKey) -> void:
 			_toggle_wet_surface()
 		KEY_G:
 			_toggle_force_gizmo()
+		KEY_F6:
+			_replay_enter()
+		KEY_F7:
+			_replay_step(1)
+		KEY_F8:
+			_replay_step(-1)
+		KEY_F9:
+			_replay_exit()
 
 
 ## Horizontal world direction from the ball to the current mouse pointer's
@@ -228,6 +242,29 @@ func _toggle_slowmo() -> void:
 	var new_scale: float = 1.0 if Engine.time_scale < 1.0 else 0.25
 	Engine.time_scale = new_scale
 	print("[Sandbox] time_scale = %.2f" % new_scale)
+
+
+func _replay_enter() -> void:
+	if _ball == null or not (_ball is BallPhysics):
+		return
+	var bp: BallPhysics = _ball as BallPhysics
+	bp.enter_replay()
+	print("[Sandbox] replay ON (cursor at newest entry)")
+
+
+func _replay_exit() -> void:
+	if _ball == null or not (_ball is BallPhysics):
+		return
+	var bp: BallPhysics = _ball as BallPhysics
+	bp.exit_replay()
+	print("[Sandbox] replay OFF (resumed from cursor)")
+
+
+func _replay_step(delta: int) -> void:
+	if _ball == null or not (_ball is BallPhysics):
+		return
+	var bp: BallPhysics = _ball as BallPhysics
+	bp.step_replay(delta)
 
 
 func _toggle_force_gizmo() -> void:
