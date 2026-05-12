@@ -201,7 +201,22 @@ sliders; the items are scheduled to be re-evaluated then.
 | 2026-05-11 | T07     | 7 new GUT tests; total suite 17/17 PASS |
 
 ## Sprint 04 — Debug UI & Runtime Parameters
-_(reserved)_
+
+### Architectural Decisions
+
+| ID      | Decision | Rationale |
+|---------|----------|-----------|
+| S04-A01 | Native Godot Control nodes instead of `imgui-godot` (R2 8.1 deviation) | `imgui-godot` ships source-only — building it would require .NET tooling plus a SCons/CMake GDExtension C++ pass on Windows. Out of scope for a tuning sprint that just needs sliders + a dropdown. Native `Panel` / `ScrollContainer` / `HSlider` / `OptionButton` build the panel procedurally in `PhysicsDebugUI.gd`, run with zero external dependencies and port cleanly to mobile in Phase 2 (touch-friendly layout will land then). Trade-offs vs imgui: no docking, no multi-window, no live console — acceptable for a single tuning panel |
+| S04-A02 | Two-way binding via `PhysicsConfig.set(key, value)` per slider event | Each row stores `{slider, value_label, step}` keyed by the PhysicsConfig property name. `value_changed.connect(_on_slider_changed.bind(key))` lets us reuse a single handler that writes back into the live resource and updates the readout label. The next physics tick reads the new coefficient — no restart, no reload, no signal indirection. CheckButton handles the six boolean toggles symmetrically |
+| S04-A03 | `BallPhysics` caches `last_force_*` Newton vectors every substep | The debug UI needs magnitude readouts and the 3D gizmo needs direction vectors. Recomputing each force outside the integrator would duplicate logic and risk drift. `compute_force` now stores gravity / drag / Magnus separately; knuckle stores `a_knuckle · m`; grass derives from the velocity delta across the kick step. `last_force_net` is their sum. Pure functions stay pure — the side-effect of writing the cache is on the instance, not on the pure-function arguments |
+| S04-A04 | `ForceGizmo` uses `ImmediateMesh` with one vertex-coloured `PRIMITIVE_LINES` surface per redraw | Same trade-off as the trajectory ribbon (S02-A06): `ImmediateMesh.clear_surfaces()` + `surface_begin()` per frame is ~0.05 ms for the ~36 vertices needed by six arrow segments. A `MultiMeshInstance3D` with cached arrow meshes would be faster but adds setup cost we don't need at six arrows; revisit only if we ever need per-ball gizmos for multiple agents. Length scale 0.04 m/N is the calibrated readability sweet spot — Magnus arrows of ~40 cm at full curve speed are obvious next to the 22 cm ball, gravity arrows of ~17 cm hint at scale, sub-3 cm arrows are suppressed to avoid clutter at rest |
+| S04-A05 | Built-in presets shipped as `.tres` under `res://resources/presets/` | One file per preset, plain text, diff-able. The debug UI scans the directory at startup and exposes everything it finds in the dropdown — adding a fourth preset later is just dropping a file in. User-saved presets live under `user://presets/<timestamp>.tres` so per-machine tuning persists between runs without polluting the repo. Built-in dropdown labels prefixed `[builtin]`, user labels `[user]`, dropdown index 0 is `(current)` (no-op) so accidental dropdown clicks don't reset progress |
+
+### Sprint 04 Calibration Sessions
+
+| Date       | Task    | Notes |
+|------------|---------|-------|
+| 2026-05-12 | T01-T05 | PhysicsDebugUI scene + script, telemetry fields, presets, ForceGizmo wired and committed; visual validation pending user smoke test |
 
 ## Sprint 05 — Validation & Mobile Export
 _(reserved)_
