@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/ForceGizmo.gd" id="1_gizmo"]
+
+[node name="ForceGizmo" type="Node3D"]
+script = ExtResource("1_gizmo")
+ball_path = NodePath("../Ball")
+enabled = false
