@@ -225,10 +225,23 @@ sliders; the items are scheduled to be re-evaluated then.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Lob second-bounce "schizzo" | [PENDING] | User reported the LMB lob's second bounce occasionally appears to gain velocity (`prende velocità e schizza, poi riprende traiettoria normale`). Suspected cause: Cross-2002 grip case converting rotational energy acquired at the first bounce into linear motion at the second — this IS textbook physics (spinning ball + grip impulse), but with the current `e_t = 0.5` / `μ_s = 0.4` / hollow-shell `k = 2/3` parameters the apparent magnitude may be unrealistic. Needs an isolated numerical test (record `v_pre`, `v_post`, `ω_pre`, `ω_post`, total KE pre/post for several consecutive bounces) before deciding between (a) tuning `e_t` / `μ_s` down for the wet case, (b) introducing an explicit spin-decay friction at each bounce, or (c) accepting the behaviour as physically correct and adjusting the visual cue. Does NOT block Sprint 4 merge — debug UI is the deliverable, not bounce calibration |
+| Lob second-bounce "schizzo" | **CLOSED 2026-05-12 (S05-A01)** | T01 (`test_bounce_energy.gd`) ruled out a numerical energy gain — KE_post(i+1) ≤ KE_post(i) holds for every shape tested, including the strong-topspin slip-case stressor. T06 frame-step replay let the user inspect the bounce sequence tick by tick and confirmed: "non si tratta di un vero aumento di velocità — il terzo rimbalzo perde molta parabola, la velocità residua viene proiettata in avanti molto di più del rimbalzo precedente, dando l'effetto schizzo". Root cause is **perceptual**: angle-aware restitution (S02-A10) collapses `e_eff` toward zero on grazing impacts → the bounce arc shrinks rapidly across consecutive hits → horizontal speed (preserved by the slip case) drives the ball forward visibly faster than the previous, much taller arc did. Physics is correct. No parameter change required. Visual smoothing (dust particle, motion blur at low height) is Phase 2 polish, not Sprint 5 calibration |
 
-## Sprint 05 — Validation & Mobile Export
-_(reserved)_
+## Sprint 05 — Calibration & Validation
+
+### Architectural Decisions
+
+| ID      | Decision | Rationale |
+|---------|----------|-----------|
+| S05-A01 | LMB lob "schizzo" is perceptual, not a physics bug — **no parameter change**, close PENDING | T01 `tests/unit/test_bounce_energy.gd` simulates four shot shapes (spinless lob, topspin curve, backspin drop, strong-topspin slip-case stressor) through `integrate_step_pure` + `resolve_static_collisions` with drag / grass / Magnus / knuckle disabled, and asserts `KE_post(i+1) ≤ KE_post(i) · (1 + 1e-2)` between consecutive hard bounces. All 4 cases pass — the model does not create energy. T06 frame-step replay (P / `,` / `.`) let the user walk the bounce sequence tick-by-tick on the actual lob shape; user confirmation: "non si tratta di un vero aumento di velocità — il terzo rimbalzo perde molta parabola, la velocità residua viene proiettata in avanti molto di più del rimbalzo precedente, dando l'effetto schizzo". Mechanism: angle-aware restitution (S02-A10) collapses `e_eff` toward zero on grazing impacts → the bounce arc shrinks fast across consecutive hits → horizontal speed (preserved by the slip case) drives the ball forward visibly faster than the previous, much taller arc did. Decision: keep the calibration as-is. Any visual smoothing (dust puffs, low-height motion blur) is Phase 2 polish, not Sprint 5 work |
+
+### Sprint 05 Calibration Sessions
+
+| Date       | Task    | Notes |
+|------------|---------|-------|
+| 2026-05-12 | T01     | Bounce energy harness — 4 shot shapes, KE monotone non-increasing PASS. Full suite 21/21. |
+| 2026-05-12 | T06     | Frame-step replay (600-tick ring buffer, P / `,` / `.`). Key remap from F6-F9 because Godot editor reserves those for run / stop scene controls. |
+| 2026-05-12 | T02     | Lob "schizzo" PENDING closed — perceptual artefact, no physics change (S05-A01). |
 
 ---
 
