@@ -16,11 +16,14 @@ extends Node3D
 ## therefore draws a 40 cm arrow — readable next to a 22 cm-diameter
 ## ball without dominating the screen.
 
-const FORCE_SCALE: float = 0.04
-const SHAFT_HALF_WIDTH: float = 0.015      ## 3 cm thick shaft in world space
-const HEAD_LEN_RATIO: float = 0.22
-const HEAD_HALF_WIDTH: float = 0.06        ## 12 cm wide arrowhead
-const MIN_LENGTH_DRAW: float = 0.05        ## skip arrows shorter than 5 cm
+## Camera in the sandbox sits ~40 m from the ball, FOV 45°. To read an
+## arrow we need it ≥ ~5 px on screen, which at that distance means
+## ≥ ~15 cm width and ≥ ~50 cm length. Scaled accordingly.
+const FORCE_SCALE: float = 0.15            ## 0.15 m / N (was 0.04 — too tiny at 40 m cam)
+const SHAFT_HALF_WIDTH: float = 0.06       ## 12 cm thick shaft in world space
+const HEAD_LEN_RATIO: float = 0.25
+const HEAD_HALF_WIDTH: float = 0.22        ## 44 cm wide arrowhead
+const MIN_LENGTH_DRAW: float = 0.15        ## skip arrows shorter than 15 cm
 
 @export var ball_path: NodePath
 @export var enabled: bool = true
@@ -58,18 +61,29 @@ func _init_mesh() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.mesh = _imesh
 	_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Force the renderer to never frustum-cull the gizmo. ImmediateMesh's
+	# AABB is computed from the first surface emitted; if the first frame
+	# happens before _ball is resolved we'd never get a valid AABB and
+	# the arrows would be silently culled. A huge cull margin sidesteps
+	# the issue without paying per-frame AABB recomputation cost.
+	_mesh_instance.extra_cull_margin = 16384.0
 	add_child(_mesh_instance)
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.vertex_color_use_as_albedo = true
 	_material.albedo_color = Color.WHITE
-	# Render both sides of the thin shaft / arrowhead quads — the camera
-	# may end up on either side as the ball rolls past it.
+	# Render both sides so the arrows are visible from any camera angle.
 	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	# Slightly above geometry so the overlay isn't z-fought by the
-	# ground or the ball mesh. Depth test remains ON so arrows occlude
-	# correctly behind the field if needed.
-	_material.no_depth_test = false
+	# Draw on top of everything (ball mesh, field) so the gizmo stays
+	# readable even when the ball passes in front. Slight overdraw cost,
+	# acceptable for a debug overlay.
+	_material.no_depth_test = true
+	_material.disable_receive_shadows = true
+	# Also assign as material_override on the MeshInstance3D — belt and
+	# braces. surface_begin(material) sets the surface material; the
+	# override guarantees the renderer picks it up even if Godot ever
+	# changes how ImmediateMesh surface materials propagate.
+	_mesh_instance.material_override = _material
 
 
 func _process(_delta: float) -> void:
