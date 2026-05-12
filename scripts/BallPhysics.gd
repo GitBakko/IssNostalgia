@@ -90,6 +90,14 @@ var _kn_rng: RandomNumberGenerator
 # `reset_knuckle_clock` (called by every launcher).
 var _knuckle_active_for_shot: bool = false
 
+# Per-zone wet state (S05-A08). `_wet_zone_count` is a refcount of
+# overlapping wet SurfaceZones — the ball stays wet until every zone
+# has been exited, so adjacent patches don't flicker when the ball
+# rolls along their boundary. Surface getters read `_is_wet()` which
+# OR-combines the zone state with the global `config.surface_wet`
+# flag (backwards compat with the Sprint 3 W-key toggle).
+var _wet_zone_count: int = 0
+
 # Replay (Sprint 5 T06) — ring buffer of recent physics ticks so the
 # user can pause + frame-step through a bounce sequence to diagnose
 # perceptual artefacts (e.g. the LMB lob "schizzo"). One entry per
@@ -708,21 +716,38 @@ func _restitution_at_velocity(v_n_mag: float) -> float:
 	return e_base * exp(-v_n_mag / config.restitution_v_ref)
 
 
+## True when the ball is over a wet SurfaceZone OR the global wet flag
+## is set. Surface getters branch on this — the zone always wins, the
+## global flag is a fallback for scenes without zones.
+func _is_wet() -> bool:
+	return _wet_zone_count > 0 or config.surface_wet
+
+
+## Called by `SurfaceZone` on body_entered. Public + idempotent on the
+## stack semantics: N entries → N exits to clear.
+func enter_wet_zone() -> void:
+	_wet_zone_count += 1
+
+
+func exit_wet_zone() -> void:
+	_wet_zone_count = maxi(_wet_zone_count - 1, 0)
+
+
 ## Surface-sensitive parameter getters.
 func _restitution_base() -> float:
-	return config.restitution_base_wet if config.surface_wet else config.restitution_base
+	return config.restitution_base_wet if _is_wet() else config.restitution_base
 
 
 func _mu_s() -> float:
-	return config.bounce_mu_s_wet if config.surface_wet else config.bounce_mu_s
+	return config.bounce_mu_s_wet if _is_wet() else config.bounce_mu_s
 
 
 func _rolling_friction() -> float:
-	return config.rolling_friction_wet if config.surface_wet else config.rolling_friction_coeff
+	return config.rolling_friction_wet if _is_wet() else config.rolling_friction_coeff
 
 
 func _grass_kick_amount() -> float:
-	return config.grass_roughness_kick_wet if config.surface_wet else config.grass_roughness_kick
+	return config.grass_roughness_kick_wet if _is_wet() else config.grass_roughness_kick
 
 
 ## Continuous rolling resistance. Applies an opposing-to-motion deceleration

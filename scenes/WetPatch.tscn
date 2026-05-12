@@ -1,0 +1,27 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/SurfaceZone.gd" id="1_zone"]
+
+[sub_resource type="BoxShape3D" id="BoxShape_zone"]
+size = Vector3(5.0, 0.4, 5.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_zone"]
+size = Vector3(5.0, 0.02, 5.0)
+
+[sub_resource type="StandardMaterial3D" id="Mat_wet"]
+albedo_color = Color(0.16, 0.30, 0.50, 0.65)
+transparency = 1
+metallic = 0.1
+roughness = 0.35
+
+[node name="WetPatch" type="Area3D"]
+script = ExtResource("1_zone")
+wet = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape_zone")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.015, 0)
+mesh = SubResource("BoxMesh_zone")
+material_override = SubResource("Mat_wet")

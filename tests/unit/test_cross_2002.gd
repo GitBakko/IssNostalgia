@@ -109,3 +109,42 @@ func test_wet_surface_reduces_rolling_friction() -> void:
 	cfg.surface_wet = true
 	var roll_wet: float = ball._rolling_friction()
 	assert_lt(roll_wet, roll_dry, "Wet rolling friction must be lower than dry")
+
+
+# --- Per-zone surfaces (S05-A08, Sprint 5 T05) ----------------------------
+
+func test_wet_zone_overrides_global_dry() -> void:
+	# Global flag dry, but stepping into a wet zone must switch all four
+	# surface-aware getters to their wet values.
+	cfg.surface_wet = false
+	var mu_dry: float = ball._mu_s()
+	var roll_dry: float = ball._rolling_friction()
+	var e_dry: float = ball._restitution_base()
+	var kick_dry: float = ball._grass_kick_amount()
+	ball.enter_wet_zone()
+	assert_lt(ball._mu_s(), mu_dry, "Zone wet must lower μ_s below dry")
+	assert_lt(ball._rolling_friction(), roll_dry, "Zone wet must lower rolling friction")
+	assert_lt(ball._restitution_base(), e_dry, "Zone wet must lower e_base")
+	assert_lt(ball._grass_kick_amount(), kick_dry, "Zone wet must lower grass kick")
+	ball.exit_wet_zone()
+	assert_eq(ball._mu_s(), mu_dry, "Exiting the only wet zone restores dry μ_s")
+
+
+func test_wet_zone_refcount_stacks() -> void:
+	# Two overlapping wet zones — must stay wet after just one exit.
+	cfg.surface_wet = false
+	ball.enter_wet_zone()
+	ball.enter_wet_zone()
+	assert_true(ball._is_wet(), "Two-deep stack must report wet")
+	ball.exit_wet_zone()
+	assert_true(ball._is_wet(), "Still wet with one overlapping zone left")
+	ball.exit_wet_zone()
+	assert_false(ball._is_wet(), "Dry after both zone exits")
+
+
+func test_global_flag_still_works_without_zones() -> void:
+	# Sprint 3 W-key toggle path: no zones, only the global flag.
+	cfg.surface_wet = true
+	assert_true(ball._is_wet(), "Global flag alone must report wet")
+	cfg.surface_wet = false
+	assert_false(ball._is_wet(), "No zones + flag off must report dry")

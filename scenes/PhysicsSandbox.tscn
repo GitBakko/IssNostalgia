@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/TrajectoryVisualizer.tscn" id="5_traj"]
 [ext_resource type="PackedScene" path="res://scenes/PhysicsDebugUI.tscn" id="6_debug"]
 [ext_resource type="PackedScene" path="res://scenes/ForceGizmo.tscn" id="7_gizmo"]
+[ext_resource type="PackedScene" path="res://scenes/WetPatch.tscn" id="8_wet"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -37,6 +38,9 @@ ball_path = NodePath("../Ball")
 
 [node name="ForceGizmo" parent="." unique_id=1673386513 instance=ExtResource("7_gizmo")]
 
+[node name="WetPatch" parent="." instance=ExtResource("8_wet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 8)
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1055643380]
 
 [node name="Instructions" type="Label" parent="HUD" unique_id=1672820386]
@@ -59,7 +63,8 @@ LMB     lob to clicked ground point
 RMB drag  orbit camera (yaw/pitch)
 wheel   zoom in / out
 R       reset to spawn (ground)
-W       toggle dry / wet surface
+W       toggle dry / wet surface (global)
+        + roll through the blue patch (wet zone)
 F5      toggle slow-motion (0.25x)
 F1      debug UI panel (sliders, presets, force readout)
 G       3D force gizmo
