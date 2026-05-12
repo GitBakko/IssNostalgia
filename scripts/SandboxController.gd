@@ -29,6 +29,21 @@ var _auto_launch_frames_left: int = -1
 @onready var _telemetry: Label = $HUD/Telemetry
 @onready var _force_gizmo: Node3D = get_node_or_null("ForceGizmo")
 
+# Orbit-camera state. Derived from the static initial camera_position
+# at _ready (so launching the scene with the legacy `camera_position`
+# exported value still works), then driven by RMB drag + wheel.
+var _orbit_pitch_deg: float = 60.0   ## angle above horizontal (positive = look down)
+var _orbit_yaw_deg: float = 0.0      ## around Y, 0 = facing -Z
+var _orbit_distance: float = 40.0
+var _orbit_target: Vector3 = Vector3.ZERO
+var _rmb_dragging: bool = false
+const ORBIT_PITCH_MIN: float = 5.0
+const ORBIT_PITCH_MAX: float = 88.0
+const ORBIT_DISTANCE_MIN: float = 4.0
+const ORBIT_DISTANCE_MAX: float = 120.0
+const ORBIT_DRAG_SPEED: float = 0.3   ## degrees per pixel
+const ORBIT_WHEEL_STEP: float = 2.5   ## metres per wheel notch
+
 
 func _ready() -> void:
 	_setup_camera()
@@ -46,9 +61,31 @@ func _setup_camera() -> void:
 	if _camera == null:
 		push_warning("SandboxController: Camera3D child not found")
 		return
-	_camera.global_position = camera_position
-	_camera.look_at(camera_target, Vector3.UP)
 	_camera.fov = camera_fov_degrees
+	# Derive orbit state from the legacy camera_position so the scene
+	# still opens at the broadcast view, then orbit takes over.
+	var offset: Vector3 = camera_position - camera_target
+	_orbit_target = camera_target
+	_orbit_distance = clampf(offset.length(), ORBIT_DISTANCE_MIN, ORBIT_DISTANCE_MAX)
+	if _orbit_distance > 1e-3:
+		_orbit_pitch_deg = clampf(rad_to_deg(asin(offset.y / _orbit_distance)),
+			ORBIT_PITCH_MIN, ORBIT_PITCH_MAX)
+		_orbit_yaw_deg = rad_to_deg(atan2(offset.x, offset.z))
+	_update_orbit_camera()
+
+
+func _update_orbit_camera() -> void:
+	if _camera == null:
+		return
+	var pitch_r: float = deg_to_rad(_orbit_pitch_deg)
+	var yaw_r: float = deg_to_rad(_orbit_yaw_deg)
+	var off: Vector3 = Vector3(
+		cos(pitch_r) * sin(yaw_r),
+		sin(pitch_r),
+		cos(pitch_r) * cos(yaw_r),
+	) * _orbit_distance
+	_camera.global_position = _orbit_target + off
+	_camera.look_at(_orbit_target, Vector3.UP)
 
 
 func _connect_ball_signals() -> void:
@@ -179,8 +216,17 @@ func _capture_screenshot() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		_handle_key(event as InputEventKey)
-	elif event is InputEventMouseButton and event.pressed:
-		_handle_mouse(event as InputEventMouseButton)
+	elif event is InputEventMouseButton:
+		_handle_mouse_button(event as InputEventMouseButton)
+	elif event is InputEventMouseMotion and _rmb_dragging:
+		_handle_orbit_drag(event as InputEventMouseMotion)
+
+
+func _handle_orbit_drag(event: InputEventMouseMotion) -> void:
+	_orbit_yaw_deg -= event.relative.x * ORBIT_DRAG_SPEED
+	_orbit_pitch_deg = clampf(_orbit_pitch_deg - event.relative.y * ORBIT_DRAG_SPEED,
+		ORBIT_PITCH_MIN, ORBIT_PITCH_MAX)
+	_update_orbit_camera()
 
 
 func _handle_key(event: InputEventKey) -> void:
@@ -280,13 +326,30 @@ func _toggle_wet_surface() -> void:
 	print("[Sandbox] surface_wet = %s" % cfg.surface_wet)
 
 
-func _handle_mouse(event: InputEventMouseButton) -> void:
-	if event.button_index != MOUSE_BUTTON_LEFT:
-		return
+func _handle_mouse_button(event: InputEventMouseButton) -> void:
+	match event.button_index:
+		MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_lob_to_mouse(event.position)
+		MOUSE_BUTTON_RIGHT:
+			_rmb_dragging = event.pressed
+		MOUSE_BUTTON_WHEEL_UP:
+			if event.pressed:
+				_orbit_distance = clampf(_orbit_distance - ORBIT_WHEEL_STEP,
+					ORBIT_DISTANCE_MIN, ORBIT_DISTANCE_MAX)
+				_update_orbit_camera()
+		MOUSE_BUTTON_WHEEL_DOWN:
+			if event.pressed:
+				_orbit_distance = clampf(_orbit_distance + ORBIT_WHEEL_STEP,
+					ORBIT_DISTANCE_MIN, ORBIT_DISTANCE_MAX)
+				_update_orbit_camera()
+
+
+func _lob_to_mouse(screen_pos: Vector2) -> void:
 	if _camera == null or _launcher == null:
 		return
-	var from: Vector3 = _camera.project_ray_origin(event.position)
-	var dir: Vector3 = _camera.project_ray_normal(event.position)
+	var from: Vector3 = _camera.project_ray_origin(screen_pos)
+	var dir: Vector3 = _camera.project_ray_normal(screen_pos)
 	if dir.y >= -0.001:
 		return
 	var t: float = -from.y / dir.y
