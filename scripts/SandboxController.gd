@@ -142,11 +142,14 @@ func _update_telemetry() -> void:
 	var v: Vector3 = _ball.linear_velocity
 	var w: Vector3 = _ball.angular_velocity
 	var speed_kmh: float = v.length() * 3.6
-	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m" % [
+	var fps: float = Engine.get_frames_per_second()
+	var phys_fps: int = Engine.physics_ticks_per_second
+	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m\nFPS       %4.0f  /  phys %d Hz" % [
 		_ball.global_position.x, _ball.global_position.y, _ball.global_position.z,
 		speed_kmh, v.length(),
 		w.length(),
 		_ball.global_position.y,
+		fps, phys_fps,
 	]
 
 

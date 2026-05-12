@@ -33,9 +33,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
 [node name="TrajectoryVisualizer" parent="." unique_id=1016011643 instance=ExtResource("5_traj")]
 ball_path = NodePath("../Ball")
 
-[node name="PhysicsDebugUI" parent="." instance=ExtResource("6_debug")]
+[node name="PhysicsDebugUI" parent="." unique_id=1830900528 instance=ExtResource("6_debug")]
 
-[node name="ForceGizmo" parent="." instance=ExtResource("7_gizmo")]
+[node name="ForceGizmo" parent="." unique_id=1673386513 instance=ExtResource("7_gizmo")]
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1055643380]
 
@@ -70,7 +70,7 @@ anchor_right = 1.0
 offset_left = -360.0
 offset_top = 24.0
 offset_right = -24.0
-offset_bottom = 140.0
+offset_bottom = 180.0
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4

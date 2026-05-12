@@ -5,17 +5,22 @@ extends Node3D
 ## ball position for the active force vectors. Reads `last_force_*`
 ## fields on BallPhysics (populated by the integrator each substep).
 ##
-## Toggle visibility with G in SandboxController. Lines drawn with
-## ImmediateMesh + a single unshaded ORM_StandardMaterial3D per colour.
+## Toggle visibility with G in SandboxController.
+##
+## Geometry: each arrow is built from world-space triangles (a thin
+## rectangular shaft + a triangular head) so the lines stay visible
+## under the `gl_compatibility` renderer, where PRIMITIVE_LINES are
+## clamped to 1 pixel wide and effectively invisible at editor zoom.
 ##
 ## Length scale: 0.04 m per Newton. A 10 N Magnus force at 30 m/s
 ## therefore draws a 40 cm arrow — readable next to a 22 cm-diameter
 ## ball without dominating the screen.
 
 const FORCE_SCALE: float = 0.04
-const HEAD_LEN_RATIO: float = 0.18
-const HEAD_HALF_WIDTH: float = 0.04
-const MIN_LENGTH_DRAW: float = 0.03   ## skip arrows shorter than 3 cm
+const SHAFT_HALF_WIDTH: float = 0.015      ## 3 cm thick shaft in world space
+const HEAD_LEN_RATIO: float = 0.22
+const HEAD_HALF_WIDTH: float = 0.06        ## 12 cm wide arrowhead
+const MIN_LENGTH_DRAW: float = 0.05        ## skip arrows shorter than 5 cm
 
 @export var ball_path: NodePath
 @export var enabled: bool = true
@@ -52,14 +57,19 @@ func _init_mesh() -> void:
 	_imesh = ImmediateMesh.new()
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.mesh = _imesh
-	# Don't cast shadows for HUD-like overlay geometry.
 	_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_mesh_instance)
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.vertex_color_use_as_albedo = true
-	_material.no_depth_test = false
 	_material.albedo_color = Color.WHITE
+	# Render both sides of the thin shaft / arrowhead quads — the camera
+	# may end up on either side as the ball rolls past it.
+	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Slightly above geometry so the overlay isn't z-fought by the
+	# ground or the ball mesh. Depth test remains ON so arrows occlude
+	# correctly behind the field if needed.
+	_material.no_depth_test = false
 
 
 func _process(_delta: float) -> void:
@@ -70,8 +80,10 @@ func _process(_delta: float) -> void:
 
 func _redraw() -> void:
 	_imesh.clear_surfaces()
-	_imesh.surface_begin(Mesh.PRIMITIVE_LINES, _material)
-	var origin: Vector3 = _ball.global_position + Vector3(0, 0.02, 0)
+	_imesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _material)
+	# Origin slightly above ball centre so the arrow tails don't dive
+	# into the ground when the ball is at rest.
+	var origin: Vector3 = _ball.global_position + Vector3(0, 0.04, 0)
 	_draw_arrow(origin, _ball.last_force_gravity, COLOR_GRAVITY)
 	_draw_arrow(origin, _ball.last_force_drag, COLOR_DRAG)
 	_draw_arrow(origin, _ball.last_force_magnus, COLOR_MAGNUS)
@@ -81,29 +93,42 @@ func _redraw() -> void:
 	_imesh.surface_end()
 
 
+## Draw one arrow as two quads:
+##   - shaft: a thin rectangle along the force direction
+##   - head:  a triangle at the tip
+## All triangles are emitted in world space; vertex color carries the
+## per-arrow tint. `up` for the rectangle perpendicular is chosen so
+## the arrow stays readable from a top-down / broadcast camera.
 func _draw_arrow(origin: Vector3, force: Vector3, color: Color) -> void:
 	var length: float = force.length() * FORCE_SCALE
 	if length < MIN_LENGTH_DRAW:
 		return
 	var dir: Vector3 = force.normalized()
-	var tip: Vector3 = origin + dir * length
-	# Shaft
-	_imesh.surface_set_color(color)
-	_imesh.surface_add_vertex(origin)
-	_imesh.surface_set_color(color)
-	_imesh.surface_add_vertex(tip)
-	# Arrowhead — two short backward segments forming a V.
+	# Side vector — perpendicular to direction, lying roughly horizontal
+	# when the force has a vertical component. Falls back to world RIGHT
+	# when the direction is purely vertical (gravity arrow).
+	var side: Vector3 = dir.cross(Vector3.UP)
+	if side.length_squared() < 1e-6:
+		side = Vector3.RIGHT
+	side = side.normalized()
 	var head_len: float = length * HEAD_LEN_RATIO
-	var perp: Vector3 = dir.cross(Vector3.UP)
-	if perp.length_squared() < 1e-6:
-		perp = dir.cross(Vector3.RIGHT)
-	perp = perp.normalized() * HEAD_HALF_WIDTH
-	var back: Vector3 = tip - dir * head_len
+	var shaft_tip: Vector3 = origin + dir * (length - head_len)
+	var arrow_tip: Vector3 = origin + dir * length
+
+	# Shaft quad (two triangles)
+	var sw: Vector3 = side * SHAFT_HALF_WIDTH
+	_tri(origin - sw, origin + sw, shaft_tip + sw, color)
+	_tri(origin - sw, shaft_tip + sw, shaft_tip - sw, color)
+
+	# Arrowhead triangle
+	var hw: Vector3 = side * HEAD_HALF_WIDTH
+	_tri(shaft_tip - hw, shaft_tip + hw, arrow_tip, color)
+
+
+func _tri(a: Vector3, b: Vector3, c: Vector3, color: Color) -> void:
 	_imesh.surface_set_color(color)
-	_imesh.surface_add_vertex(tip)
+	_imesh.surface_add_vertex(a)
 	_imesh.surface_set_color(color)
-	_imesh.surface_add_vertex(back + perp)
+	_imesh.surface_add_vertex(b)
 	_imesh.surface_set_color(color)
-	_imesh.surface_add_vertex(tip)
-	_imesh.surface_set_color(color)
-	_imesh.surface_add_vertex(back - perp)
+	_imesh.surface_add_vertex(c)
