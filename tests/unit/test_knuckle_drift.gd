@@ -58,6 +58,7 @@ func _simulate_flight(v0: Vector3, omega0: Vector3, duration: float) -> Vector3:
 	var omega: Vector3 = omega0
 	var t: float = 0.0
 	ball.reset_knuckle_clock()
+	ball.set_knuckle_active(true)   # special-skill gate (S05-A05)
 	while t < duration:
 		var step: Dictionary = ball.integrate_step_pure(p, v, SIM_DT, omega)
 		p = step.position

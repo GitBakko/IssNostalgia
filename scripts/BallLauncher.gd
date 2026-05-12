@@ -124,9 +124,13 @@ func launch_grounder_topspin(direction: Vector3 = Vector3.RIGHT) -> void:
 
 
 ## Knuckleball toward `direction`. 28 m/s @ 10°, near-zero spin so the
-## Simplex noise stream dominates the trajectory.
+## stall+flip stream dominates the trajectory. Special skill — only
+## this launch path arms the knuckle force; every other launcher
+## clears it via `reset_knuckle_clock` in `launch()`.
 func launch_knuckle(direction: Vector3 = Vector3.RIGHT) -> void:
 	launch_at_angle(direction, 28.0, 10.0, Vector3.ZERO)
+	if _ball != null:
+		_ball.set_knuckle_active(true)
 
 
 func launch_vertical(speed: float = -1.0, spin_z: float = INF) -> void:

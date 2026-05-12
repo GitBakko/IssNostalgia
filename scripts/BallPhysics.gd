@@ -82,6 +82,14 @@ var _kn_stall_duration: float = 0.0
 var _kn_axis: Vector3 = Vector3.RIGHT
 var _kn_rng: RandomNumberGenerator
 
+# Per-shot opt-in flag (S05-A05). The stall-flip knuckle force is a
+# "special skill" that only fires when a launcher explicitly arms it
+# — every other shot type (lob, curve, dead leaf, grounder, vertical,
+# horizontal, ground click) leaves it false so e.g. a low LMB lob
+# doesn't accidentally drift sideways. Reset to false on every
+# `reset_knuckle_clock` (called by every launcher).
+var _knuckle_active_for_shot: bool = false
+
 # Replay (Sprint 5 T06) — ring buffer of recent physics ticks so the
 # user can pause + frame-step through a bounce sequence to diagnose
 # perceptual artefacts (e.g. the LMB lob "schizzo"). One entry per
@@ -271,8 +279,20 @@ func reset_knuckle_clock() -> void:
 	_kn_stall_timer = 0.0
 	_kn_stall_duration = 0.0
 	_kn_axis = Vector3.RIGHT
+	_knuckle_active_for_shot = false
 	if _kn_rng != null:
 		_kn_rng.seed = config.knuckle_seed
+
+
+## Arm or disarm the knuckle force for the current shot. Called by
+## `BallLauncher.launch_knuckle` after staging the velocity. Every
+## other launch path resets it to false via `reset_knuckle_clock`.
+func set_knuckle_active(active: bool) -> void:
+	_knuckle_active_for_shot = active
+
+
+func is_knuckle_active() -> bool:
+	return _knuckle_active_for_shot
 
 
 func _apply_debug_visual_scale() -> void:
@@ -790,6 +810,10 @@ func compute_force(velocity: Vector3, omega: Vector3 = Vector3.ZERO) -> Vector3:
 func knuckle_acceleration(velocity: Vector3, omega: Vector3,
 		_time: float, sub_dt: float = 1.0 / 120.0) -> Vector3:
 	if _kn_rng == null:
+		return Vector3.ZERO
+	# Special-skill gate (S05-A05): the knuckle only fires when a
+	# launcher has explicitly armed it for this shot.
+	if not _knuckle_active_for_shot:
 		return Vector3.ZERO
 	var v_mag: float = velocity.length()
 	if v_mag < config.knuckle_threshold_speed:
