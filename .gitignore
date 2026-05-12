@@ -14,6 +14,10 @@ mono_crash.*.json
 
 # .NET / C#
 bin/
+# Keep the imgui-godot GDExtension binaries — they ARE the addon runtime,
+# not C# build output, and Godot needs them at editor + export time.
+!addons/imgui-godot/bin/
+!addons/imgui-godot/bin/**
 obj/
 *.user
 *.suo
