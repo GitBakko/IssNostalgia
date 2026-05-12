@@ -1,0 +1,41 @@
+[gd_resource type="Resource" script_class="PhysicsConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/PhysicsConfig.gd" id="1_config"]
+
+[resource]
+script = ExtResource("1_config")
+air_density = 1.225
+gravity = 9.0
+ball_mass = 0.43
+ball_radius = 0.11
+drag_coeff = 0.30
+restitution_base = 0.75
+variable_restitution_enabled = true
+cross_2002_enabled = true
+friction = 0.20
+rolling_friction_coeff = 0.18
+grass_roughness_enabled = true
+grass_roughness_min_speed = 4.0
+grass_roughness_threshold = 0.30
+grass_roughness_kick = 0.6
+grass_roughness_frequency = 0.6
+restitution_v_ref = 45.0
+bounce_e_t = 0.65
+bounce_mu_s = 0.55
+surface_wet = false
+bounce_mu_s_wet = 0.20
+rolling_friction_wet = 0.08
+restitution_base_wet = 0.55
+grass_roughness_kick_wet = 0.15
+magnus_enabled = true
+magnus_spin_param_cap = 2.5
+magnus_min_speed = 0.5
+knuckle_enabled = true
+knuckle_threshold_spin = 2.5
+knuckle_threshold_speed = 13.0
+knuckle_amplitude = 12.0
+knuckle_seed = 1337
+knuckle_noise_frequency = 1.4
+knuckle_spike_frequency_mul = 5.0
+knuckle_spike_threshold = 0.40
+knuckle_spike_amplitude_mul = 2.2
