@@ -123,12 +123,20 @@ func launch_grounder_topspin(direction: Vector3 = Vector3.RIGHT) -> void:
 	launch_at_angle(direction, 30.0, 1.0, spin)
 
 
-## Knuckleball toward `direction`. 28 m/s @ 10°, near-zero spin so the
-## stall+flip stream dominates the trajectory. Special skill — only
-## this launch path arms the knuckle force; every other launcher
-## clears it via `reset_knuckle_clock` in `launch()`.
+## Knuckleball toward `direction`. **30 m/s @ 6°**, near-zero spin.
+##
+## Trajectory intent (S05-A06): flat low parabola — the ball rises
+## briefly, "floats" through the drag-crisis zone (14-24 m/s, where
+## Cd ≈ 0.18 makes it look like it's hanging in the air), then drops
+## sharply when it exits the crisis and the vertical-down knuckle
+## flip kicks in. Apex sits at ~50 cm, total flight ~1.4 s. NOT a
+## lob — knuckle free kicks like Ronaldo / Pirlo launch low and
+## look "floaty" mid-air, then dive.
+##
+## Special skill — only this launch path arms the knuckle force;
+## every other launcher clears it via `reset_knuckle_clock`.
 func launch_knuckle(direction: Vector3 = Vector3.RIGHT) -> void:
-	launch_at_angle(direction, 28.0, 10.0, Vector3.ZERO)
+	launch_at_angle(direction, 30.0, 6.0, Vector3.ZERO)
 	if _ball != null:
 		_ball.set_knuckle_active(true)
 

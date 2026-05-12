@@ -15,8 +15,8 @@ extends GutTest
 ## boundary. If the lock fails, retune via the F1 debug UI then update
 ## the measured-value section of PHYSICS_LOG S05-A03.
 
-const LAUNCH_SPEED: float = 28.0
-const LAUNCH_ELEVATION_DEG: float = 10.0
+const LAUNCH_SPEED: float = 30.0
+const LAUNCH_ELEVATION_DEG: float = 6.0
 const FLIGHT_TIME: float = 1.5
 const SIM_DT: float = 1.0 / 480.0          ## 4× live tick for precision
 
@@ -59,14 +59,19 @@ func _simulate_flight(v0: Vector3, omega0: Vector3, duration: float) -> Vector3:
 	var t: float = 0.0
 	ball.reset_knuckle_clock()
 	ball.set_knuckle_active(true)   # special-skill gate (S05-A05)
+	var max_y: float = p.y
 	while t < duration:
 		var step: Dictionary = ball.integrate_step_pure(p, v, SIM_DT, omega)
 		p = step.position
 		v = step.velocity
 		if cfg.knuckle_enabled:
 			v += ball.knuckle_acceleration(v0, omega, t, SIM_DT) * SIM_DT
+		if p.y > max_y:
+			max_y = p.y
 		t += SIM_DT
-	return p
+	# Stash max height for the trajectory-shape assertion via metadata
+	# baked into the return — z and y in the same Vector3.
+	return Vector3(p.x, max_y, p.z)
 
 
 func test_knuckle_drift_within_arcade_band() -> void:
@@ -74,10 +79,11 @@ func test_knuckle_drift_within_arcade_band() -> void:
 	var v0: Vector3 = Vector3(LAUNCH_SPEED * cos(rad), LAUNCH_SPEED * sin(rad), 0.0)
 	var p_end: Vector3 = _simulate_flight(v0, Vector3.ZERO, FLIGHT_TIME)
 	var drift: float = absf(p_end.z)
+	var max_y: float = p_end.y    # see _simulate_flight: y holds the apex
 	var sweet: bool = drift >= SWEET_MIN and drift <= SWEET_MAX
 	var sweet_label: String = "INSIDE" if sweet else "OUTSIDE"
-	print("[knuckle drift] %.3f m over %.2fs at %.1f m/s @ %.1f° — sweet [%.2f, %.2f] %s" % [
-		drift, FLIGHT_TIME, LAUNCH_SPEED, LAUNCH_ELEVATION_DEG,
+	print("[knuckle] drift=%.3f m  apex=%.2f m  over %.2fs at %.1f m/s @ %.1f° — sweet [%.2f, %.2f] %s" % [
+		drift, max_y, FLIGHT_TIME, LAUNCH_SPEED, LAUNCH_ELEVATION_DEG,
 		SWEET_MIN, SWEET_MAX, sweet_label])
 	assert_gte(drift, TARGET_MIN,
 		"Knuckle drift below regression floor (%.3f m < %.2f m)" % [drift, TARGET_MIN])
