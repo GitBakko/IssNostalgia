@@ -19,7 +19,19 @@ extends Resource
 
 # ---- Aerodynamic drag (active Sprint 1+) ---------------------------------
 @export_group("Drag")
-@export var drag_coeff: float = 0.47            ## Cd, smooth sphere
+@export var drag_coeff: float = 0.47            ## Cd subcritico, palla rugosa
+                                                ## (smooth sphere ~0.45)
+
+# Drag crisis model (Sprint 5 T03b). For a FIFA ball with seams the Cd
+# drops from ~0.47 (subcritical) to ~0.18 (supercritical) across the
+# Re ≈ 2.2–3.3 × 10^5 transition, which for a 22 cm ball at sea level
+# corresponds to v ≈ 14–24 m/s. The drop is visually decisive: the ball
+# "doesn't slow down" in the critical range and then loses speed quickly
+# when it falls back below v_low. Sources: PMC3657093 / Asai 2007.
+@export var drag_crisis_enabled: bool = true
+@export var drag_crisis_v_low: float = 14.0     ## m/s, Cd starts to fall
+@export var drag_crisis_v_high: float = 24.0    ## m/s, Cd reaches minimum
+@export var drag_crisis_cd_low: float = 0.18    ## supercritical Cd
 
 # ---- Ground interaction (Sprint 3 will activate variable model) ----------
 @export_group("Ground")
@@ -112,3 +124,24 @@ extends Resource
                                                       ## suddenly veer in real life)
 @export var knuckle_spike_amplitude_mul: float = 1.8  ## extra acceleration multiplier
                                                       ## applied above threshold
+                                                      ## [LEGACY — unused since
+                                                      ## S05-A04 stall-flip rewrite]
+
+# Sprint 5 T03b — Stall+flip knuckleball model.
+# Replaces the continuous Simplex noise with discrete "hold-and-flip"
+# events sampled from real-world side-force statistics (1–2 flips per
+# 1.5 s of flight, 0.35–0.70 s stalls, transient ramp ~0.12 s, Cy
+# amplitude 0.05–0.15 physical / 0.15–0.25 arcade). See PHYSICS_LOG
+# S05-A04 and the linked Hong & Asai (2010) / PMC3660809 sources.
+@export var knuckle_cy_min: float = 0.15              ## |Cy| minimum (arcade range)
+@export var knuckle_cy_max: float = 0.20              ## |Cy| maximum (arcade range)
+@export var knuckle_stall_min: float = 0.35           ## s — minimum stall duration
+@export var knuckle_stall_max: float = 0.70           ## s — maximum stall duration
+@export var knuckle_transient_rate: float = 8.0       ## 1/s — Cy ramp speed
+                                                      ## (~0.12 s to reach a new target)
+@export var knuckle_lateral_bias: float = 0.7         ## probability that the flip axis
+                                                      ## is horizontal (vs vertical)
+@export var knuckle_arcade_multiplier: float = 1.5    ## Cy_effective = Cy · this.
+                                                      ## 1.0 = physical, 1.5 = arcade-C
+                                                      ## (current default), 2.0+ = heavy
+                                                      ## arcade. Tunable live via F1 UI

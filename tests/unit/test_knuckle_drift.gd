@@ -20,10 +20,14 @@ const LAUNCH_ELEVATION_DEG: float = 10.0
 const FLIGHT_TIME: float = 1.5
 const SIM_DT: float = 1.0 / 480.0          ## 4× live tick for precision
 
+## Provisional bounds while the stall-flip arcade calibration is being
+## tuned by hand via the F1 debug UI. Will be tightened once the user
+## locks the preferred `knuckle_arcade_multiplier` / `knuckle_cy_max`
+## combo as S05-A04 (Sprint 5 T03).
 const TARGET_MIN: float = 0.5
-const TARGET_MAX: float = 2.0
-const SWEET_MIN: float = 0.8               ## reported, not asserted
-const SWEET_MAX: float = 1.5               ## reported, not asserted
+const TARGET_MAX: float = 10.0
+const SWEET_MIN: float = 2.5               ## reported, not asserted (option C target)
+const SWEET_MAX: float = 4.0               ## reported, not asserted (option C target)
 
 var ball: BallPhysics
 var cfg: PhysicsConfig
@@ -59,7 +63,7 @@ func _simulate_flight(v0: Vector3, omega0: Vector3, duration: float) -> Vector3:
 		p = step.position
 		v = step.velocity
 		if cfg.knuckle_enabled:
-			v += ball.knuckle_acceleration(v0, omega, t) * SIM_DT
+			v += ball.knuckle_acceleration(v0, omega, t, SIM_DT) * SIM_DT
 		t += SIM_DT
 	return p
 
