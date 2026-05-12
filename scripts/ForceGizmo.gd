@@ -103,7 +103,12 @@ func _redraw() -> void:
 	_draw_arrow(origin, _ball.last_force_magnus, COLOR_MAGNUS)
 	_draw_arrow(origin, _ball.last_force_knuckle, COLOR_KNUCKLE)
 	_draw_arrow(origin, _ball.last_force_grass, COLOR_GRASS)
-	_draw_arrow(origin, _ball.last_force_net, COLOR_NET)
+	# Skip the net arrow when it would just duplicate the gravity arrow
+	# at rest — keeps the purple gravity vector visible alone instead of
+	# being overdrawn by an identical white arrow.
+	var f_net_minus_grav: Vector3 = _ball.last_force_net - _ball.last_force_gravity
+	if f_net_minus_grav.length() > 0.5:
+		_draw_arrow(origin, _ball.last_force_net, COLOR_NET)
 	_imesh.surface_end()
 
 

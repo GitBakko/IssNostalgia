@@ -43,7 +43,7 @@ ball_path = NodePath("../Ball")
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 700.0
-offset_bottom = 380.0
+offset_bottom = 440.0
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
@@ -60,7 +60,9 @@ R       reset to spawn (ground)
 W       toggle dry / wet surface
 F5      toggle slow-motion (0.25x)
 F1      debug UI panel (sliders, presets, force readout)
-G       3D force gizmo (drag/magnus/knuckle arrows)
+G       3D force gizmo
+        viola=gravity  rosso=drag  verde=magnus
+        giallo=knuckle  blu=grass  bianco=net (sum)
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD" unique_id=564516205]
