@@ -63,9 +63,8 @@ F1      debug UI panel (sliders, presets, force readout)
 G       3D force gizmo
         viola=gravity  rosso=drag  verde=magnus
         giallo=knuckle  blu=grass  bianco=net (sum)
-F6      enter replay (pause + cursor at latest)
-F7/F8   replay step +1 / -1 physics tick
-F9      exit replay (resume from cursor)
+P       toggle replay (pause/resume from cursor)
+. / ,   replay step +1 / -1 physics tick
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD" unique_id=564516205]

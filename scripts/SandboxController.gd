@@ -208,14 +208,12 @@ func _handle_key(event: InputEventKey) -> void:
 			_toggle_wet_surface()
 		KEY_G:
 			_toggle_force_gizmo()
-		KEY_F6:
-			_replay_enter()
-		KEY_F7:
+		KEY_P:
+			_replay_toggle()
+		KEY_PERIOD:
 			_replay_step(1)
-		KEY_F8:
+		KEY_COMMA:
 			_replay_step(-1)
-		KEY_F9:
-			_replay_exit()
 
 
 ## Horizontal world direction from the ball to the current mouse pointer's
@@ -244,20 +242,16 @@ func _toggle_slowmo() -> void:
 	print("[Sandbox] time_scale = %.2f" % new_scale)
 
 
-func _replay_enter() -> void:
+func _replay_toggle() -> void:
 	if _ball == null or not (_ball is BallPhysics):
 		return
 	var bp: BallPhysics = _ball as BallPhysics
-	bp.enter_replay()
-	print("[Sandbox] replay ON (cursor at newest entry)")
-
-
-func _replay_exit() -> void:
-	if _ball == null or not (_ball is BallPhysics):
-		return
-	var bp: BallPhysics = _ball as BallPhysics
-	bp.exit_replay()
-	print("[Sandbox] replay OFF (resumed from cursor)")
+	if bp.is_replay_active():
+		bp.exit_replay()
+		print("[Sandbox] replay OFF (resumed from cursor)")
+	else:
+		bp.enter_replay()
+		print("[Sandbox] replay ON (cursor at newest entry)")
 
 
 func _replay_step(delta: int) -> void:
