@@ -27,6 +27,7 @@ var _auto_launch_frames_left: int = -1
 @onready var _ball: RigidBody3D = $Ball as RigidBody3D
 @onready var _launcher: BallLauncher = $BallLauncher
 @onready var _telemetry: Label = $HUD/Telemetry
+@onready var _force_gizmo: Node3D = get_node_or_null("ForceGizmo")
 
 
 func _ready() -> void:
@@ -141,11 +142,14 @@ func _update_telemetry() -> void:
 	var v: Vector3 = _ball.linear_velocity
 	var w: Vector3 = _ball.angular_velocity
 	var speed_kmh: float = v.length() * 3.6
-	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m" % [
+	var fps: float = Engine.get_frames_per_second()
+	var phys_fps: int = Engine.physics_ticks_per_second
+	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m\nFPS       %4.0f  /  phys %d Hz" % [
 		_ball.global_position.x, _ball.global_position.y, _ball.global_position.z,
 		speed_kmh, v.length(),
 		w.length(),
 		_ball.global_position.y,
+		fps, phys_fps,
 	]
 
 
@@ -196,6 +200,8 @@ func _handle_key(event: InputEventKey) -> void:
 			_toggle_slowmo()
 		KEY_W:
 			_toggle_wet_surface()
+		KEY_G:
+			_toggle_force_gizmo()
 
 
 ## Horizontal world direction from the ball to the current mouse pointer's
@@ -222,6 +228,15 @@ func _toggle_slowmo() -> void:
 	var new_scale: float = 1.0 if Engine.time_scale < 1.0 else 0.25
 	Engine.time_scale = new_scale
 	print("[Sandbox] time_scale = %.2f" % new_scale)
+
+
+func _toggle_force_gizmo() -> void:
+	if _force_gizmo == null:
+		return
+	_force_gizmo.visible = not _force_gizmo.visible
+	if "enabled" in _force_gizmo:
+		_force_gizmo.enabled = _force_gizmo.visible
+	print("[Sandbox] force gizmo = %s" % _force_gizmo.visible)
 
 
 func _toggle_wet_surface() -> void:

@@ -17,6 +17,10 @@ run/main_scene="res://scenes/PhysicsSandbox.tscn"
 config/features=PackedStringArray("4.6", "Mobile")
 config/icon="res://icon.svg"
 
+[autoload]
+
+ImGuiRoot="*uid://dugmpnsxaagba"
+
 [display]
 
 window/size/viewport_width=1920
@@ -28,6 +32,10 @@ window/handheld/orientation=1
 [dotnet]
 
 project/assembly_name="IssNostalgia"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg")
 
 [physics]
 

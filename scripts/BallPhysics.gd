@@ -64,6 +64,16 @@ signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
 
 var _current_substeps: int = SUBSTEPS_LOW
 var _sim_time: float = 0.0
+
+# Telemetry — last computed force vectors (Newton). Read by the debug UI
+# and the force gizmo. Updated every physics substep.
+var last_force_gravity: Vector3 = Vector3.ZERO
+var last_force_drag: Vector3 = Vector3.ZERO
+var last_force_magnus: Vector3 = Vector3.ZERO
+var last_force_knuckle: Vector3 = Vector3.ZERO
+var last_force_grass: Vector3 = Vector3.ZERO
+var last_force_net: Vector3 = Vector3.ZERO
+var last_spin_param: float = 0.0
 var _knuckle_noise_a: FastNoiseLite
 var _knuckle_noise_b: FastNoiseLite
 var _grass_noise: FastNoiseLite
@@ -285,7 +295,11 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	# Knuckleball perturbation. Time-dependent (Simplex noise), so it
 	# lives outside `compute_force` and gets applied as a velocity delta.
 	if config.knuckle_enabled:
-		v += knuckle_acceleration(state.linear_velocity, omega, _sim_time) * sub_dt
+		var a_kn: Vector3 = knuckle_acceleration(state.linear_velocity, omega, _sim_time)
+		last_force_knuckle = a_kn * config.ball_mass
+		v += a_kn * sub_dt
+	else:
+		last_force_knuckle = Vector3.ZERO
 
 	# Resolve static-world collision (ground + perimeter walls).
 	var collision: Dictionary = resolve_static_collisions(p, v, omega)
@@ -300,7 +314,13 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	# Rolling resistance (continuous, ground-contact only).
 	v = apply_rolling_resistance(p, v, sub_dt)
 	# Grass micro-bumps (position-driven, fires on rising threshold).
+	var v_pre_grass: Vector3 = v
 	v = apply_grass_roughness(p, v, sub_dt)
+	last_force_grass = (v - v_pre_grass) * config.ball_mass / maxf(sub_dt, 1e-6)
+	last_force_net = (
+		last_force_gravity + last_force_drag + last_force_magnus
+		+ last_force_knuckle + last_force_grass
+	)
 
 	state.linear_velocity = v
 	var t: Transform3D = state.transform
@@ -563,10 +583,16 @@ func integrate_step_pure(position: Vector3, velocity: Vector3, sub_dt: float,
 ## perturbation is applied separately inside `_integrate_substep`
 ## because it needs simulation time (T02).
 func compute_force(velocity: Vector3, omega: Vector3 = Vector3.ZERO) -> Vector3:
-	var f: Vector3 = _gravity_force() + _drag_force(velocity)
-	if config.magnus_enabled:
-		f += _magnus_force(velocity, omega)
-	return f
+	var fg: Vector3 = _gravity_force()
+	var fd: Vector3 = _drag_force(velocity)
+	var fm: Vector3 = _magnus_force(velocity, omega) if config.magnus_enabled else Vector3.ZERO
+	last_force_gravity = fg
+	last_force_drag = fd
+	last_force_magnus = fm
+	var v_mag: float = velocity.length()
+	last_spin_param = 0.0 if v_mag < 1e-3 else minf(
+		config.ball_radius * omega.length() / v_mag, config.magnus_spin_param_cap)
+	return fg + fd + fm
 
 
 ## Knuckleball acceleration (m/s²), perpendicular to the velocity.

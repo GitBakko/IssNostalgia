@@ -201,7 +201,31 @@ sliders; the items are scheduled to be re-evaluated then.
 | 2026-05-11 | T07     | 7 new GUT tests; total suite 17/17 PASS |
 
 ## Sprint 04 — Debug UI & Runtime Parameters
-_(reserved)_
+
+### Architectural Decisions
+
+| ID      | Decision | Rationale |
+|---------|----------|-----------|
+| S04-A01 | Native Godot Control nodes instead of `imgui-godot` (R2 8.1 deviation) | `imgui-godot` ships source-only — building it would require .NET tooling plus a SCons/CMake GDExtension C++ pass on Windows. Out of scope for a tuning sprint that just needs sliders + a dropdown. Native `Panel` / `ScrollContainer` / `HSlider` / `OptionButton` build the panel procedurally in `PhysicsDebugUI.gd`, run with zero external dependencies and port cleanly to mobile in Phase 2 (touch-friendly layout will land then). Trade-offs vs imgui: no docking, no multi-window, no live console — acceptable for a single tuning panel |
+| S04-A02 | Two-way binding via `PhysicsConfig.set(key, value)` per slider event | Each row stores `{slider, value_label, step}` keyed by the PhysicsConfig property name. `value_changed.connect(_on_slider_changed.bind(key))` lets us reuse a single handler that writes back into the live resource and updates the readout label. The next physics tick reads the new coefficient — no restart, no reload, no signal indirection. CheckButton handles the six boolean toggles symmetrically |
+| S04-A03 | `BallPhysics` caches `last_force_*` Newton vectors every substep | The debug UI needs magnitude readouts and the 3D gizmo needs direction vectors. Recomputing each force outside the integrator would duplicate logic and risk drift. `compute_force` now stores gravity / drag / Magnus separately; knuckle stores `a_knuckle · m`; grass derives from the velocity delta across the kick step. `last_force_net` is their sum. Pure functions stay pure — the side-effect of writing the cache is on the instance, not on the pure-function arguments |
+| S04-A04 | `ForceGizmo` uses `ImmediateMesh` with one vertex-coloured `PRIMITIVE_LINES` surface per redraw | Same trade-off as the trajectory ribbon (S02-A06): `ImmediateMesh.clear_surfaces()` + `surface_begin()` per frame is ~0.05 ms for the ~36 vertices needed by six arrow segments. A `MultiMeshInstance3D` with cached arrow meshes would be faster but adds setup cost we don't need at six arrows; revisit only if we ever need per-ball gizmos for multiple agents. Length scale 0.04 m/N is the calibrated readability sweet spot — Magnus arrows of ~40 cm at full curve speed are obvious next to the 22 cm ball, gravity arrows of ~17 cm hint at scale, sub-3 cm arrows are suppressed to avoid clutter at rest |
+| S04-A05 | Built-in presets shipped as `.tres` under `res://resources/presets/` | One file per preset, plain text, diff-able. The debug UI scans the directory at startup and exposes everything it finds in the dropdown — adding a fourth preset later is just dropping a file in. User-saved presets live under `user://presets/<timestamp>.tres` so per-machine tuning persists between runs without polluting the repo. Built-in dropdown labels prefixed `[builtin]`, user labels `[user]`, dropdown index 0 is `(current)` (no-op) so accidental dropdown clicks don't reset progress |
+| S04-A06 | `imgui-godot` v6.3.2 installed from the official release zip; supersedes S04-A01 and closes the R2 8.1 lock | The source submodule pinned at v6.3.1+4 carried no prebuilt binaries — building the GDExtension would have required SCons / CMake / vcpkg / godot-cpp on Windows. The official v6.3.2 release ships a `bin/` folder with .dll / .so / .framework for every desktop OS. Replacing the submodule with the release tree (committed flat under `addons/imgui-godot/`) gives the plugin zero-build adoption: enable in `[editor_plugins]`, add the `ImGuiRoot` autoload, and any GDScript can call `ImGui.SliderFloat` / `ImGui.Checkbox` / `ImGui.Combo` directly. `.gitignore` adds a negation for `addons/imgui-godot/bin/**` because the global `bin/` rule (for C# build output) would otherwise drop the shared libraries — they're addon runtime, not build artefacts. PhysicsDebugUI rewritten in ImGui GDScript: same parameter table, same preset / save-user-preset workflow, same live binding contract; roughly half the code of the native-Control prototype and trivial to extend with docking, themes, or per-shot HUD overlays in later sprints |
+
+### Sprint 04 Calibration Sessions
+
+| Date       | Task    | Notes |
+|------------|---------|-------|
+| 2026-05-12 | T01-T05 | PhysicsDebugUI scene + script (native Controls), telemetry fields, presets, ForceGizmo wired and committed |
+| 2026-05-12 | T07     | imgui-godot v6.3.2 integrated; PhysicsDebugUI ported to ImGui GDScript; native Controls retired (S04-A06 supersedes S04-A01) |
+| 2026-05-12 | T08     | Hotfixes: FPS counter added to HUD (user couldn't verify rendering perf), ForceGizmo rewritten with triangles + scale 0.04→0.15 m/N + extra_cull_margin + no_depth_test so arrows are actually visible at 40 m camera distance, net arrow suppressed at rest so the purple gravity arrow isn't overdrawn by an identical white one. HUD includes a colour legend |
+
+### Sprint 04 Open Issues
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Lob second-bounce "schizzo" | [PENDING] | User reported the LMB lob's second bounce occasionally appears to gain velocity (`prende velocità e schizza, poi riprende traiettoria normale`). Suspected cause: Cross-2002 grip case converting rotational energy acquired at the first bounce into linear motion at the second — this IS textbook physics (spinning ball + grip impulse), but with the current `e_t = 0.5` / `μ_s = 0.4` / hollow-shell `k = 2/3` parameters the apparent magnitude may be unrealistic. Needs an isolated numerical test (record `v_pre`, `v_post`, `ω_pre`, `ω_post`, total KE pre/post for several consecutive bounces) before deciding between (a) tuning `e_t` / `μ_s` down for the wet case, (b) introducing an explicit spin-decay friction at each bounce, or (c) accepting the behaviour as physically correct and adjusting the visual cue. Does NOT block Sprint 4 merge — debug UI is the deliverable, not bounce calibration |
 
 ## Sprint 05 — Validation & Mobile Export
 _(reserved)_
