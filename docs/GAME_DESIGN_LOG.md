@@ -126,3 +126,38 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | 2026-05-13 | T05-fix4-6 | Reception facing — first try `set_facing_immediate` (snap) read as scatto. Replaced with `start_facing_warp` per R09-F04 (warp 50 rad/s, ~110 ms). Then moved warp from on-pickup to **at-pass-fire** time on the targeted teammate (`receiver_prewarp_duration_s = 0.30`) for real-football realism. |
 | 2026-05-13 | T05-fix7 | Pass active-switch glitch — `TeamController._manual_override_remaining` (240 tick = 2 s) blocked autoswitch to receiver. `PassingController` now explicitly calls `team_controller.set_active(target_idx)` when the pass-anim window expires. Deterministic, no race with override. |
 | 2026-05-13 | T06   | VisualRoot decoupling validated against tests 1-5 (snap-on-direction-change, no jitter circular walk, carry-during-turn, front-marker readability, shoot/pass direction correct). Test 6 (post-pass receiver orientation) covered by fix5/fix6 warp. |
+
+---
+
+## Sprint 08 — Discuss Phase (decisioni accettate, 2026-05-13)
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| S08-D01 | **Sprint 8 title** = "Close Control + Static AI" (non solo "Static AI" come da Phase 2 contract originario). Close Control entra come T01-T03 prima dello Static AI. | User direction post-Sprint 7 playtest. Close-control è feature critica per "feel" arcade, merita slot esplicito prima dello StaticAI che dipende da palla viva. |
+| S08-D02 | **Touch-cycle release kind**: `BallController.request_release(velocity, angular, kind: ReleaseKind)`. `ReleaseKind ∈ {SHOOT, PASS, TOUCH}`. Solo SHOOT/PASS armano il `_pickup_lockout_remaining_s = 0.3`. TOUCH → no lockout. | Sprint 7 lockout 0.3 s impedirebbe il touch-cycle interval (0.4 s sprint < 0.3 s lockout). Distinzione kind preserva anti re-grab per shoot/pass mantenendo il dribble vivo. |
+| S08-D03 | **Receiver pre-orientation warp** (Sprint 7 fix6) **NON si attiva** su `kind == TOUCH`. Solo SHOOT/PASS. | Touch è continuo — un warp a ogni intervallo sarebbe rumore. Pre-warp resta solo per pass intenzionali. |
+| S08-D04 | **Carry offset**: `lerp(0.3, 0.5, player_speed/max_walk_speed)` modulato runtime invece del fisso 0.5 m attuale. Y stays -0.7 (ankle), Z front (negativo per Godot -Z forward). | Da R02-F04 EA Pitch Notes — elite players keep ball closer at walk, push further at sprint. |
+| S08-D05 | **Ball speed coupling during sprint**: `ball.linear_velocity = carrier.velocity * touch_speed_ratio` (default 0.95). | Da R02-F04 — elite retain 88-95 % player speed; MVP fisso 0.95, Sprint 9+ legato a TeamConfig.dribble_skill. |
+| S08-D06 | **Loss threshold** = 1.6 m base (= 2 × pickup radius) per R02-F05. Player.tight_control bool flag raises a 2.0 m (R02-F07 future "Tight Control" skill). MVP flag default false. | Architecture C (proximity + position-copy) requires explicit loss boundary. 1.6 m sopra pickup radius lascia margine recovery. |
+| S08-D07 | **Static AI tactical update** = 2 Hz (ogni 0.5 s), NOT per-tick. Position lerp `alpha = dt / 1.5`. Max reposition speed 6-10 m/s per ruolo. | Da R05-F01 / R05-F04 — influence maps non per-frame, mobile CPU friendly. Lerp + speed cap evita scatti visibili. |
+| S08-D08 | **Static AI target formula** = `anchor + (ball - anchor) * role_factor` con `role_factor` = {GK: 0.1, DEF: 0.3, MID: 0.5, ATT: 0.7}. | Da R05-F02 / R05-F05 — Voronoi statico = formation anchors, gradient role-differentiated empiricamente validato. |
+| S08-D09 | **GK reactive save**: teleport-on-trajectory cheat (R04-F02 motivato — umani veri si pre-committano 100-250 ms prima del contatto). Give-up gate: `\|intercept_x\| > 3.2` OR `predicted_height > 2.44`. | Da R04-F01 + R04-F06 — pattern arcade leggero con give-up gate evita "GK robotico onnipotente". |
+| S08-D10 | **GK reaction delay** (R04-F03 elite 193 ± 67 ms) **deferred a Phase 3**. Phase 2 GK keeps no-delay teleport. | Cheat è intenzionale Sprint 8. Reaction delay è polish (Phase 3 active opponent AI). |
+| S08-D11 | **NBA Jam catch-up boost** (R09-F02): schema esposto in T06 (`@export` flags + hooks su Goalkeeper.get_effective_reaction_time). Runtime gate ritorna sempre false in Sprint 8 — applicazione in Sprint 9 quando esiste scoreboard. | Schema-only ora evita refactor in Sprint 9. Hooks pronti, attivazione 1 riga. |
+
+### Sprint 08 — Findings → Code Mapping (popolato a fine sprint, T08)
+
+| Finding | File:func / commit | Status |
+|---------|--------------------|--------|
+| R02-F04 speed-modulated carry offset | _TBD T01_ | _PENDING_ |
+| R02-F05 touch-cycle (Architecture C, 1.6 m loss) | _TBD T02_ | _PENDING_ |
+| R02-F07 magnetic feel + dribble_skill + tight_control | _TBD T03_ | _PENDING_ |
+| R05-F01..F06 Static AI 2 Hz tactical, anchor + ball-attraction | _TBD T04_ | _PENDING_ |
+| R04-F01/F02/F04/F05/F06 GK reactive save + give-up gate | _TBD T05_ | _PENDING_ |
+| R04-F03 reaction delay | DEFERRED → Phase 3 | DEFERRED |
+| R09-F02 NBA Jam catch-up boost (schema-only) | _TBD T06_ | _PENDING_ |
+
+### Sprint 08 — Calibration Sessions
+
+| Date       | Task   | Notes |
+|------------|--------|-------|
