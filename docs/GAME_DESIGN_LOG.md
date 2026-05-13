@@ -61,8 +61,13 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 
 ## Sprint 06 — Calibration Sessions
 
-(Compilato durante l'esecuzione delle task.)
-
-| Date | Task | Notes |
-|------|------|-------|
-| | | |
+| Date       | Task   | Notes |
+|------------|--------|-------|
+| 2026-05-13 | T00    | Sprint 06 plan + GAME_DESIGN_LOG seed con 30 decisioni S06-D01..D30 dal discuss-phase. Branch `sprint/06-player-entity` creato off `main` post `v0.5.0-sprint05`. |
+| 2026-05-13 | T01    | TeamConfig.gd + FormationData.gd typed Resources, preset 2-1-1 con anchors (DEF_LEFT -15,0,-35; DEF_RIGHT 15,0,-35; MID 0,0,-15; ATT 0,0,5; GK 0,0,-50) e role_offset_meters (6/6/4/2/0). team_a.tres blu human, team_b.tres rosso AI, mirror via get_anchor_mirrored (Z negato, X preservato). 8 GUT test → suite 38/38. |
+| 2026-05-13 | T02    | Player.gd CharacterBody3D + state machine + stamina (drain 1/3 s/s, recovery 1/5 s/s, gated S06-D04) + rotation slerp FR-independent (R01-F04, R06-F06). Player.tscn capsule 0.4×1.8 + collision layer 2 mask 7 + BodyMesh + FrontMarker. material_override colorato da team in _ready. 10 GUT test → suite 48/48. |
+| 2026-05-13 | T03    | InputMap p1_* (WASD + Shift + Q + Space + E) via physical_keycode. PlayerController con ActionMap abstraction (action_prefix), input buffer 100 ms (R09-F05), coyote 6 frames framework. is_shooting / is_passing flags pronti per Sprint 7 ball gate. 10 GUT test → suite 58/58. |
+| 2026-05-13 | T04    | TeamController auto-switch + hysteresis (8m ± 0.5m dead zone, 3-frame hold S06-D01) + manual Q cycle skip GK + selection indicator runtime-instanced (CylinderMesh, alpha 0.85 active / 0.25 dim / hidden AI). 9 GUT test → suite 67/67. |
+| 2026-05-13 | T05    | GameMatch.tscn: pitch 105×68 + 4 pali + MockBall yellow + Sun + camera broadcast + HUD label. GameMatch.gd spawn 10 player + 2 TeamController + 1 PlayerControllerA. Visual playtest: bug Q-switch — cycle funzionava ma autoswitch revocava entro 25 ms. **Hotfix S06-D31** cooldown 240 frame post-cycle. **Hotfix2 S06-D31 update** — auto-refresh while ball static OR active player moving (cooldown fisso ancora insufficiente con MockBall ferma). **Hotfix3 S06-D32** — Player auto-decel quando undriven (era ghost-inertia post-switch). 8 GUT test + 3 hotfix test → suite 79/79. |
+| 2026-05-13 | T06    | both_human flag debug (S06-D29): spawn PlayerControllerB con prefix p2_, TeamControllerB.is_human=true. InputMap +13 actions (p2_*: Frecce/RShift/NumEnter/Num+/Num-; debug_ball_*: [/]/;/'/B). move_ball_relative + randomize_ball_position API pubbliche. HUD multilinea P1/P2 + FPS. HelpLabel scena con full keymap. 4 nuovi test → suite 83/83. |
+| 2026-05-13 | T07    | Regression confirmed 83/83 PASS, 484 asserts, 3.2 s headless. Sprint 5→6 delta: +53 test, +192 asserts. Hardened test_game_match_setup contro stato del scene file (helper `_spawn_match(both_human)` rebuild-on-demand). FPS counter aggiunto al HUD. User confirm FPS ≥ 60 sustained con 10 player + Q + ball-move debug keys. |

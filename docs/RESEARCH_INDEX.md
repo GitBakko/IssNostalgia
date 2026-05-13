@@ -205,3 +205,25 @@ Sample result: `"possession magnetic ball"` → top hit `research:R02:finding-07
 - Update **"Used in Sprint"** column as Sprint 6-9 consume each finding.
 - Add post-implementation **VALIDATED** / **SUPERSEDED** markers to track which findings panned out.
 - New findings (e.g. discovered during Sprint playtests) follow same key pattern: `research:R0X:finding-NN`.
+
+---
+
+## Sprint 06 — Findings Applied
+
+| Finding | How it landed in code | Status |
+|---------|------------------------|--------|
+| R01-F03 (input < 100 ms perceptible) | `PlayerController.buffer_window_ms = 100.0`; input poll runs each `_physics_process` tick (8.3 ms @ 120 Hz) — zero added delay | VALIDATED |
+| R01-F04 (basis.slerp / interpolate_with) | `Player.update_facing` uses `transform.basis.slerp(target_basis, alpha)` with FR-independent alpha = `1 - 0.5^(rotation_speed * dt)` — Euler lerp avoided | VALIDATED |
+| R01-F05 (stamina patterns) | `STAMINA_DRAIN_PER_SEC = 1/3`, `STAMINA_RECOVERY_PER_SEC = 1/5`, gated by sprint-released (S06-D04). Soft penalty (R01-F05 specific 10-20 % speed drop on exhaust) deferred to Sprint 9 polish. | PARTIAL |
+| R02-F02 / F06 (KINEMATIC freeze, deferred set) | Schema designed in TeamController (controller-pointer model, Player flags `is_busy_with_ball_action`); the actual `freeze_mode = FREEZE_MODE_KINEMATIC` toggle on the real RigidBody3D ball lands in Sprint 7 ball-pickup task. | DESIGN-LOCKED |
+| R06-F06 (frame-rate-independent low-pass filter) | Applied in `Player.update_facing` (alpha pow). Camera path will reuse the same formula in Sprint 9. | VALIDATED |
+| R07-F03 (ActionMap abstraction) | `PlayerController.action_prefix` ('p1_' / 'p2_'); ACTION_SUFFIXES list isolates action names from key literals. project.godot ships both prefix sets — touch (Sprint 10) attaches to the same suffixes. | VALIDATED |
+| R08-F01 (CharacterBody3D for players) | `Player extends CharacterBody3D`; ball stays RigidBody3D + custom_integrator. No N² constraint solver cost on the 10-player path. | VALIDATED |
+| R08-F02 (collision mask layout) | Layer 1 World, Layer 2 Players (`Player.tscn` collision_layer=2 mask=7=World+Players+Ball). GoalTrigger mask reserved for Sprint 8. | PARTIAL |
+| R09-F05 (input buffering 100 ms + coyote 6 frames) | `PlayerController.consume_buffered` (consumed-on-hit) + `was_recently_valid` (non-destructive). Ring size 4 per action, `coyote_window_frames = 6`. Sprint 7 tackles will be the first consumer of `was_recently_valid`. | VALIDATED |
+
+Findings reserved for later sprints (no Phase 2 implementation yet):
+R01-F01/02/06/07, R02-F01/03/04/05/07, R03 all (Sprint 7), R04 all (Sprint 8 GK),
+R05 all (Sprint 8 StaticAI), R06-F01..F05/F07 (Sprint 9 camera), R07-F01/F02/F04..F07
+(Sprint 10 touch), R08-F03..F07 (profile after first measurable bottleneck),
+R09-F01..F04/F06/F07 (juice / aftertouch / NBA-Jam catch-up — Sprint 8/9/Phase 3).
