@@ -168,18 +168,23 @@ func _update_hud() -> void:
 	var line_a: String = "P1 %s — %s   stamina: %.2f" % [
 		team_a_config.team_name, role, active.stamina,
 	]
+	var fps_line: String = "FPS %d   /  phys %d Hz" % [
+		Engine.get_frames_per_second(),
+		Engine.physics_ticks_per_second,
+	]
 	if both_human and team_b_player_ctrl != null:
 		var b_active: Player = team_b_player_ctrl.player
 		var b_role: String = ""
 		if b_active != null and b_active.role_index < formation.role_labels.size():
 			b_role = formation.role_labels[b_active.role_index]
-		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f" % [
+		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s" % [
 			line_a, team_b_config.team_name,
 			b_role,
 			b_active.stamina if b_active else 0.0,
+			fps_line,
 		]
 	else:
-		hud_active_label.text = line_a
+		hud_active_label.text = "%s\n%s" % [line_a, fps_line]
 
 
 # ---- Diagnostics ---------------------------------------------------------

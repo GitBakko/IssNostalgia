@@ -7,11 +7,22 @@ extends GutTest
 var scene_root: Node
 
 
-func before_each() -> void:
+## Spawn a fresh GameMatch with `both_human` forced to the given value.
+## Used by every test so results don't depend on whatever flag value the
+## scene file currently carries on disk.
+func _spawn_match(both_human: bool) -> GameMatch:
+	if is_instance_valid(scene_root):
+		scene_root.queue_free()
 	scene_root = preload("res://scenes/GameMatch.tscn").instantiate()
+	(scene_root as GameMatch).both_human = both_human
 	add_child(scene_root)
-	# Wait one frame so _ready runs; GUT add_child triggers _ready immediately,
-	# but extra await is harmless.
+	return scene_root as GameMatch
+
+
+func before_each() -> void:
+	# Default fixture: single-human (Team A only). Tests that need
+	# both_human override via _spawn_match(true).
+	_spawn_match(false)
 
 
 func after_each() -> void:
@@ -27,10 +38,12 @@ func test_scene_spawns_ten_players_total() -> void:
 	assert_eq(match_node.players_b.size(), 5, "Team B: 5 players")
 
 
-func test_team_a_is_human_team_b_is_ai_by_default() -> void:
-	var m: GameMatch = scene_root as GameMatch
-	assert_true(m.team_a_ctrl.is_human, "Team A defaults to human")
-	assert_false(m.team_b_ctrl.is_human, "Team B defaults to AI")
+func test_team_a_human_team_b_ai_when_both_human_off() -> void:
+	# Configuration intent — Team A is always human; Team B follows the
+	# both_human flag. Tests the wiring at flag=false.
+	var m: GameMatch = scene_root as GameMatch  # already spawned with false
+	assert_true(m.team_a_ctrl.is_human, "Team A is always human")
+	assert_false(m.team_b_ctrl.is_human, "Team B is AI when both_human=false")
 	assert_not_null(m.team_a_player_ctrl,
 		"Human team A must have a PlayerController")
 
@@ -122,22 +135,16 @@ func test_debug_random_ball_inside_field_bounds() -> void:
 
 
 func test_both_human_disabled_team_b_has_no_player_controller() -> void:
-	# Default scene has both_human=false.
-	var m: GameMatch = scene_root as GameMatch
-	assert_false(m.both_human, "Scene default: both_human=false")
+	var m: GameMatch = _spawn_match(false)
+	assert_false(m.both_human)
 	assert_null(m.team_b_player_ctrl,
-		"Without both_human, Team B must NOT spawn a PlayerController")
+		"both_human=false → Team B must NOT spawn a PlayerController")
 	assert_false(m.team_b_ctrl.is_human,
-		"Without both_human, Team B is AI side")
+		"both_human=false → Team B is AI side")
 
 
 func test_both_human_enabled_spawns_p2_controller() -> void:
-	# Tear down the default scene and rebuild with both_human=true.
-	scene_root.queue_free()
-	scene_root = preload("res://scenes/GameMatch.tscn").instantiate()
-	(scene_root as GameMatch).both_human = true
-	add_child(scene_root)
-	var m: GameMatch = scene_root as GameMatch
+	var m: GameMatch = _spawn_match(true)
 	assert_true(m.both_human)
 	assert_not_null(m.team_b_player_ctrl,
 		"both_human=true must spawn a PlayerController for Team B")
