@@ -41,6 +41,22 @@ const PLAYER_SCENE: PackedScene = preload("res://scenes/Player.tscn")
 @export var camera_bounds_half_x_m: float = 50.0
 @export var camera_bounds_half_z_m: float = 30.0
 
+@export_group("Camera debug controls (Sprint 8 dev-tool)")
+## Initial distance from the rig pivot to the Camera3D, in metres.
+## Matches the Sprint 7 (.tscn) static transform (sqrt(35²+55²) ≈ 65.2).
+@export var camera_distance_default_m: float = 65.2
+@export var camera_distance_min_m: float = 15.0
+@export var camera_distance_max_m: float = 120.0
+## Pitch (look-down angle) in degrees from horizontal. Matches the
+## Sprint 7 -40° camera rotation around X.
+@export var camera_pitch_default_deg: float = 40.0
+@export var camera_pitch_min_deg: float = 10.0
+@export var camera_pitch_max_deg: float = 85.0
+## Mouse wheel zoom step (m per notch).
+@export var camera_wheel_zoom_step_m: float = 3.0
+## Right-mouse-drag orbit sensitivity (degrees per pixel).
+@export var camera_orbit_sensitivity: float = 0.35
+
 @export_group("Debug")
 ## When true, Team B is also human-driven via the `p2_*` action set
 ## (Arrow keys / RShift / Numpad-Enter). S06-D29 — debug-only, never
@@ -72,6 +88,13 @@ var team_b_passer: PassingController
 var players_a: Array[Player] = []
 var players_b: Array[Player] = []
 
+# ---- Camera orbit / zoom state (Sprint 8 dev-tool) -----------------------
+var _camera_yaw_deg: float = 0.0
+var _camera_pitch_deg: float = 40.0    ## init in _ready from export
+var _camera_distance_m: float = 65.2    ## init in _ready from export
+var _rmb_dragging: bool = false
+var _camera_node: Camera3D
+
 
 func _ready() -> void:
 	if team_a_config == null or team_b_config == null or formation == null:
@@ -82,6 +105,12 @@ func _ready() -> void:
 	_spawn_team_a()
 	_spawn_team_b()
 	_spawn_ball_controllers()
+	# Camera dev-tool state init.
+	_camera_pitch_deg = camera_pitch_default_deg
+	_camera_distance_m = camera_distance_default_m
+	if camera_rig != null:
+		_camera_node = camera_rig.get_node_or_null(^"Camera3D") as Camera3D
+	_apply_camera_orientation()
 	_print_setup_summary()
 
 
@@ -229,6 +258,66 @@ func _update_camera(delta: float) -> void:
 	current.z = clampf(current.z, -camera_bounds_half_z_m, camera_bounds_half_z_m)
 	current.y = 0.0
 	camera_rig.global_position = current
+
+
+# ---- Camera dev-tool: orbit + zoom --------------------------------------
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Mouse wheel → zoom (distance ±step per notch).
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		match mb.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				if mb.pressed:
+					_zoom_camera(-camera_wheel_zoom_step_m)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if mb.pressed:
+					_zoom_camera(+camera_wheel_zoom_step_m)
+			MOUSE_BUTTON_RIGHT:
+				_rmb_dragging = mb.pressed
+			MOUSE_BUTTON_MIDDLE:
+				if mb.pressed:
+					_reset_camera_orientation()
+	elif event is InputEventMouseMotion and _rmb_dragging:
+		var mm: InputEventMouseMotion = event as InputEventMouseMotion
+		_camera_yaw_deg -= mm.relative.x * camera_orbit_sensitivity
+		_camera_pitch_deg = clampf(
+			_camera_pitch_deg - mm.relative.y * camera_orbit_sensitivity,
+			camera_pitch_min_deg, camera_pitch_max_deg,
+		)
+		_apply_camera_orientation()
+
+
+func _zoom_camera(delta_m: float) -> void:
+	_camera_distance_m = clampf(
+		_camera_distance_m + delta_m,
+		camera_distance_min_m, camera_distance_max_m,
+	)
+	_apply_camera_orientation()
+
+
+func _reset_camera_orientation() -> void:
+	_camera_yaw_deg = 0.0
+	_camera_pitch_deg = camera_pitch_default_deg
+	_camera_distance_m = camera_distance_default_m
+	_apply_camera_orientation()
+
+
+## Apply (yaw, pitch, distance) to the rig + camera_node. Rig owns yaw
+## (rotates around centroid), Camera3D owns local pitch + back-distance.
+func _apply_camera_orientation() -> void:
+	if camera_rig == null:
+		return
+	camera_rig.rotation.y = deg_to_rad(_camera_yaw_deg)
+	if _camera_node == null:
+		return
+	var p: float = deg_to_rad(_camera_pitch_deg)
+	var y_offset: float = _camera_distance_m * sin(p)
+	var z_offset: float = _camera_distance_m * cos(p)
+	_camera_node.position = Vector3(0.0, y_offset, z_offset)
+	# Camera looks DOWN at angle p from horizontal — rotation around X.
+	# A -p rotation around local X tips the camera nose down by p degrees.
+	_camera_node.rotation = Vector3(-p, 0.0, 0.0)
 
 
 # ---- Debug ball-move helpers (T06) ---------------------------------------
