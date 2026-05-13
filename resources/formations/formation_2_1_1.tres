@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="FormationData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/FormationData.gd" id="1_formation"]
+
+[resource]
+script = ExtResource("1_formation")
+formation_id = &"2-1-1"
+role_anchors = [Vector3(-15, 0, -35), Vector3(15, 0, -35), Vector3(0, 0, -15), Vector3(0, 0, 5), Vector3(0, 0, -50)]
+role_offset_meters = [6.0, 6.0, 4.0, 2.0, 0.0]
+role_names = [&"def_left", &"def_right", &"mid", &"att", &"gk"]
+role_labels = ["LB", "RB", "M", "F", "GK"]
