@@ -201,12 +201,27 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 		arc_height_override: float = -1.0) -> void:
 	if _ball == null:
 		return
+	var v: Vector3 = compute_velocity_to_point(target_xz, arc_height_override)
+	if v == Vector3.ZERO:
+		return
+	launch(v, Vector3.ZERO)
+
+
+## Compute-only sibling of `launch_to_point` — returns the launch
+## velocity vector without firing. Sprint 7 PassingController uses this
+## so the pass goes out through `BallController.request_release` instead
+## of bypassing the possession state via `apply_launch_state` directly.
+## Returns Vector3.ZERO when the ball ref is missing or origin == target.
+func compute_velocity_to_point(target_xz: Vector3,
+		arc_height_override: float = -1.0) -> Vector3:
+	if _ball == null:
+		return Vector3.ZERO
 	var origin: Vector3 = _ball.global_position
 	var horizontal: Vector3 = Vector3(target_xz.x - origin.x, 0.0,
 		target_xz.z - origin.z)
 	var dist: float = horizontal.length()
 	if dist < 0.001:
-		return
+		return Vector3.ZERO
 	var dir: Vector3 = horizontal / dist
 	# Arc height: scaled to make medium / long lobs look like real
 	# football crosses — apex ~6-10 m, not a flat laser pass. A "low
@@ -224,7 +239,7 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 		if absf(ratio - 1.0) < 0.01:
 			break
 		v_horizontal *= ratio
-	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)
+	return dir * v_horizontal + Vector3.UP * v_vertical
 
 
 ## Drag-aware landing distance for the iterative lob solver. Uses

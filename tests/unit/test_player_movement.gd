@@ -120,16 +120,35 @@ func test_facing_target_updates_only_with_movement_input() -> void:
 
 
 func test_update_facing_rotates_basis_toward_target() -> void:
-	# Force a 90° turn and check the basis converges over multiple ticks.
+	# Force a 90° turn and check the visual basis converges (S07-T06:
+	# rotation now lives on VisualRoot, not on the CharacterBody3D).
 	player._facing_target = Vector3(1.0, 0.0, 0.0)  # face +X
-	# Initial: -Z basis vector points along world -Z (default capsule basis).
-	for _i in 240:  ## 2 s
+	for _i in 240:  ## 2 s — plenty even at baseline rotation_speed
 		player.update_facing(SUB_DT)
-	# After 2 s the slerp should have nearly completed (alpha per tick
-	# ≈ 0.045 with rotation_speed=8). -Z of basis should now point ~+X.
-	var forward: Vector3 = -player.transform.basis.z
+	var forward: Vector3 = player.get_visual_forward()
 	assert_almost_eq(forward.x, 1.0, 0.05,
-		"Basis -Z must rotate to +X, got %s" % forward)
+		"VisualRoot -Z must rotate to +X, got %s" % forward)
+
+
+func test_t06_collision_basis_stays_identity_while_visual_rotates() -> void:
+	# S07-T06 invariant: update_facing rotates the VisualRoot ONLY. The
+	# CharacterBody3D basis stays at identity so the rotationally-
+	# symmetric capsule collider isn't pointlessly transformed every
+	# tick. This is the visual-vs-physics decoupling that R01-F07 and
+	# R09-F04 call for.
+	player._facing_target = Vector3(1.0, 0.0, 0.0)
+	for _i in 60:
+		player.update_facing(SUB_DT)
+	# Visual moved.
+	var vf: Vector3 = player.get_visual_forward()
+	assert_gt(vf.x, 0.1,
+		"VisualRoot must have rotated noticeably toward +X")
+	# Collision body did not.
+	var body_basis: Basis = player.transform.basis
+	assert_true(body_basis.x.is_equal_approx(Vector3.RIGHT),
+		"CharacterBody3D basis.x must stay at world +X, got %s" % body_basis.x)
+	assert_true(body_basis.z.is_equal_approx(Vector3.BACK),
+		"CharacterBody3D basis.z must stay at world +Z, got %s" % body_basis.z)
 
 
 # ---- team-colour application ----------------------------------------------
@@ -154,7 +173,8 @@ func test_player_decelerates_when_left_undriven() -> void:
 
 
 func test_team_colour_applied_to_body_mesh() -> void:
-	var body: MeshInstance3D = player.get_node("BodyMesh") as MeshInstance3D
+	# S07-T06: BodyMesh now lives under VisualRoot.
+	var body: MeshInstance3D = player.get_node("VisualRoot/BodyMesh") as MeshInstance3D
 	assert_not_null(body)
 	var mat: StandardMaterial3D = body.material_override as StandardMaterial3D
 	assert_not_null(mat,

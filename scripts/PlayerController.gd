@@ -159,6 +159,13 @@ func _full(suffix: StringName) -> StringName:
 	return StringName(action_prefix + String(suffix))
 
 
+## Public read of the WASD analog input for this controller. Exposed so
+## ShootingController can sample the player's intended direction during
+## the hold-charge window without re-implementing the prefix lookup.
+func read_movement_input() -> Vector3:
+	return _read_movement_input()
+
+
 func _read_movement_input() -> Vector3:
 	# Right-handed, -Z forward (Godot default), +X right.
 	var x: float = (
