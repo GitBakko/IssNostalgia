@@ -208,6 +208,45 @@ func test_pass_noop_when_active_does_not_carry_ball() -> void:
 	assert_false(ok, "Pass without possession returns false")
 
 
+# ---- receiver pre-orientation (R09-F04) --------------------------------
+
+func test_pass_arms_facing_warp_on_target_receiver() -> void:
+	# Real-football realism: when the pass FIRES, the targeted teammate
+	# starts turning toward the passer BEFORE the ball arrives.
+	var active: Player = players_a[0]
+	active.global_position = Vector3.ZERO
+	players_a[1].global_position = Vector3(0.0, 0.0, -10.0)  ## target ahead
+	for i in [2, 3, 4]:
+		players_a[i].global_position = Vector3(0.0, 0.0, +50.0)
+	# Sanity: receiver starts with NO warp armed.
+	assert_eq(players_a[1]._facing_warp_remaining_s, 0.0)
+	var ok: bool = pc.try_pass()
+	assert_true(ok)
+	assert_gt(players_a[1]._facing_warp_remaining_s, 0.0,
+		"Pass-fire must arm a facing warp on the target receiver")
+	# After ~150 ms of update_facing the receiver should be looking
+	# (mostly) toward the passer (+Z direction in this fixture).
+	for _i in 18:
+		players_a[1].update_facing(1.0 / 120.0)
+	var forward: Vector3 = -players_a[1].transform.basis.z
+	assert_almost_eq(forward.z, 1.0, 0.05,
+		"Receiver must end up facing toward the passer (+Z here)")
+
+
+func test_pass_does_not_warp_anyone_on_fallback() -> void:
+	# No teammate in cone → fallback pass to "10 m forward". No specific
+	# receiver, so no facing warp on any teammate.
+	var active: Player = players_a[0]
+	active.global_position = Vector3.ZERO
+	for i in [1, 2, 3, 4]:
+		players_a[i].global_position = Vector3(0.0, 0.0, +50.0)
+		players_a[i].transform.basis = Basis.IDENTITY
+	pc.try_pass()
+	for i in [1, 2, 3, 4]:
+		assert_eq(players_a[i]._facing_warp_remaining_s, 0.0,
+			"Fallback pass must NOT warp any teammate's facing")
+
+
 # ---- pass-anim gate -----------------------------------------------------
 
 func test_pass_sets_is_passing_flag_for_anim_duration() -> void:

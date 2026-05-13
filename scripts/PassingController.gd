@@ -49,6 +49,15 @@ extends Node
 ## Per S06 spec A2 — auto-switch is gated for 100 ms after a pass fires.
 @export var pass_anim_duration_s: float = 0.1
 
+@export_group("Receiver pre-orientation")
+## Real-football realism: the receiver hears the call / sees the ball
+## leaving and starts turning toward the passer BEFORE the ball arrives.
+## Mirrored here as a facing warp armed at pass-fire time on the
+## targeted teammate (R09-F04 warp pattern). 0.30 s covers the full
+## 180° turn at the warp rate plus a comfortable hold so a slow lob
+## still finds the receiver oriented when it lands.
+@export var receiver_prewarp_duration_s: float = 0.30
+
 # ---- Signals -------------------------------------------------------------
 signal pass_fired(target_position: Vector3, distance: float, target_player: Player)
 
@@ -94,6 +103,15 @@ func try_pass() -> bool:
 
 	var spin: Vector3 = _resolve_pass_spin(dir, distance)
 	ball_controller.request_release(velocity, spin)
+
+	# Receiver pre-orientation warp — fired NOW, not at pickup, so the
+	# target teammate visibly turns toward the passer while the ball is
+	# in the air (R09-F04 + real-football realism: receiver hears the
+	# call / sees the ball leave). Skipped on fallback passes (no
+	# specific receiver) and on self-passes (degenerate).
+	if target_player != null and target_player != active:
+		var to_passer: Vector3 = active.global_position - target_player.global_position
+		target_player.start_facing_warp(to_passer, receiver_prewarp_duration_s)
 
 	# Pass-anim auto-switch gate (S06 spec A2)
 	_pass_anim_remaining_s = pass_anim_duration_s
