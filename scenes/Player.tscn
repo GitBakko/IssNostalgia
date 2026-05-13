@@ -22,8 +22,8 @@ collision_mask = 7
 script = ExtResource("1_player")
 max_walk_speed = 5.5
 max_sprint_speed = 8.0
-accel = 20.0
-rotation_speed = 8.0
+accel = 50.0
+rotation_speed = 20.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape_body")

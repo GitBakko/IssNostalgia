@@ -186,3 +186,37 @@ func test_request_release_noop_when_no_carrier() -> void:
 	assert_null(bc.get_carrier())
 	assert_eq(ball._pending_linear, null,
 		"No carrier → no launch state staged")
+
+
+# ---- post-release pickup lockout ---------------------------------------
+
+func test_pickup_locked_out_immediately_after_release() -> void:
+	# Regression for the T05 playtest bug: shoot/pass releases the ball,
+	# then the same physics tick re-runs _try_pickup, the ball is still at
+	# the carry offset (well within 0.8 m of the carrier), so it gets
+	# instantly re-grabbed and the launch velocity is wiped.
+	bc._assign_carrier(players_a[0])
+	# Release with a real launch velocity, but DON'T let the ball move
+	# (we're simulating the same-tick race condition).
+	bc.request_release(Vector3(20.0, 0.0, 0.0))
+	assert_null(bc.get_carrier(), "Sanity: release cleared the carrier")
+	# Step IMMEDIATELY — pickup must NOT fire even though everyone is
+	# in range.
+	bc.step(0.0)
+	assert_null(bc.get_carrier(),
+		"Lockout must block pickup on the same physics tick as release")
+
+
+func test_pickup_resumes_after_lockout_expires() -> void:
+	bc._assign_carrier(players_a[0])
+	bc.request_release(Vector3(20.0, 0.0, 0.0))
+	# Drain the lockout. post_release_lockout_s default = 0.3 s, so
+	# stepping 0.31 s in one chunk fully drains it.
+	bc.step(0.31)
+	# Move a player back into range with the ball at rest.
+	ball.linear_velocity = Vector3.ZERO
+	ball.global_position = Vector3.ZERO
+	players_a[0].global_position = Vector3(0.4, 0.0, 0.0)
+	bc.step(0.0)
+	assert_eq(bc.get_carrier(), players_a[0],
+		"After lockout drains, normal pickup resumes")

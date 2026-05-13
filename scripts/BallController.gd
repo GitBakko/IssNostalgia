@@ -34,10 +34,22 @@ const CARRY_OFFSET_LOCAL: Vector3 = Vector3(0.0, -0.7, -0.5)
 ## from the editor when diagnosing "the ball doesn't latch" complaints.
 @export var debug_log: bool = false
 
+## Post-release pickup lockout. After a shoot / pass releases the ball,
+## NO player can pick it up for this many seconds. Without this gate,
+## the same physics tick that fires the release also re-runs the pickup
+## scan — and since the ball sits 0.5 m in front of the carrier (the
+## CARRY_OFFSET), it's already inside the 0.8 m pickup radius, so the
+## carrier instantly grabs it back and the launch velocity (staged via
+## the deferred-freeze/pending pipeline) is wiped. 300 ms covers the
+## ~36 physics ticks the integrator needs to re-establish |v| > 0 and
+## carry the ball outside the radius even for the slowest grounder pass.
+@export var post_release_lockout_s: float = 0.3
+
 # ---- Runtime state -------------------------------------------------------
 var _carrier: Player = null
 var _ordered_teams: Array[TeamController] = []
 var _last_log_pickup_dist_sq: float = INF
+var _pickup_lockout_remaining_s: float = 0.0
 
 
 func _ready() -> void:
@@ -66,14 +78,17 @@ func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO) -> void
 		])
 	_clear_carrier_flag()
 	_carrier = null
+	_pickup_lockout_remaining_s = post_release_lockout_s
 	ball.release(velocity, angular)
 
 
 ## Pure-on-instance step. Tests drive this directly with explicit player
 ## / ball positions instead of going through `_physics_process`.
-func step(_delta: float) -> void:
+func step(delta: float) -> void:
 	if ball == null:
 		return
+	if _pickup_lockout_remaining_s > 0.0:
+		_pickup_lockout_remaining_s = maxf(0.0, _pickup_lockout_remaining_s - delta)
 	if _carrier == null:
 		_try_pickup()
 	else:
@@ -100,6 +115,10 @@ func _rebuild_team_order() -> void:
 
 
 func _try_pickup() -> void:
+	# Gate 0: post-release lockout — block re-pickup so the launch
+	# velocity has time to carry the ball out of the carrier's radius.
+	if _pickup_lockout_remaining_s > 0.0:
+		return
 	# Gate 1: ball must be slow enough to grab.
 	if ball.linear_velocity.length_squared() > PICKUP_MAX_BALL_SPEED_SQ:
 		return
