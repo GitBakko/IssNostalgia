@@ -68,6 +68,10 @@ var _front_marker: MeshInstance3D
 ## an inactive player decelerates to a stop instead of coasting on its
 ## last-active velocity. (S06-D32, found during T05 Q-switch playtest.)
 var _driven_this_tick: bool = false
+## Mirrored by `BallController._assign_carrier` / `_clear_carrier_flag`.
+## Read-only intent — do not write from outside BallController, or HUD
+## state desyncs from the actual carry. Sprint 7 T02.
+var has_ball: bool = false
 
 
 func _ready() -> void:
