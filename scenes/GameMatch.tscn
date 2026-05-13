@@ -1,0 +1,131 @@
+[gd_scene load_steps=15 format=3]
+
+[ext_resource type="Script" path="res://scripts/GameMatch.gd" id="1_match"]
+[ext_resource type="Resource" path="res://resources/teams/team_a.tres" id="2_team_a"]
+[ext_resource type="Resource" path="res://resources/teams/team_b.tres" id="3_team_b"]
+[ext_resource type="Resource" path="res://resources/formations/formation_2_1_1.tres" id="4_formation"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_pitch"]
+size = Vector2(105, 68)
+
+[sub_resource type="StandardMaterial3D" id="Mat_pitch"]
+albedo_color = Color(0.18, 0.55, 0.22, 1)
+roughness = 0.85
+
+[sub_resource type="BoxShape3D" id="BoxShape_floor"]
+size = Vector3(105, 0.1, 68)
+
+[sub_resource type="SphereMesh" id="SphereMesh_ball"]
+radius = 0.11
+height = 0.22
+radial_segments = 24
+rings = 12
+
+[sub_resource type="StandardMaterial3D" id="Mat_ball"]
+albedo_color = Color(1, 0.82, 0.18, 1)
+roughness = 0.4
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+
+[sub_resource type="Sky" id="Sky_env"]
+sky_material = SubResource("SkyMat")
+
+[sub_resource type="Environment" id="Env_match"]
+background_mode = 2
+sky = SubResource("Sky_env")
+ambient_light_source = 3
+ambient_light_color = Color(0.9, 0.95, 1, 1)
+ambient_light_energy = 0.4
+ssao_enabled = false
+ssil_enabled = false
+glow_enabled = false
+
+[sub_resource type="BoxMesh" id="BoxMesh_goal_post"]
+size = Vector3(0.2, 2.44, 0.2)
+
+[sub_resource type="StandardMaterial3D" id="Mat_goal"]
+albedo_color = Color(0.95, 0.95, 0.95, 1)
+
+[node name="GameMatch" type="Node3D"]
+script = ExtResource("1_match")
+team_a_config = ExtResource("2_team_a")
+team_b_config = ExtResource("3_team_b")
+formation = ExtResource("4_formation")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env_match")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 30, 0)
+light_energy = 1.1
+shadow_enabled = true
+
+[node name="Pitch" type="StaticBody3D" parent="."]
+collision_layer = 1
+collision_mask = 0
+
+[node name="PitchMesh" type="MeshInstance3D" parent="Pitch"]
+mesh = SubResource("PlaneMesh_pitch")
+material_override = SubResource("Mat_pitch")
+
+[node name="PitchCollision" type="CollisionShape3D" parent="Pitch"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
+shape = SubResource("BoxShape_floor")
+
+[node name="GoalAPostL" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.2, 1.22, -52.5)
+mesh = SubResource("BoxMesh_goal_post")
+material_override = SubResource("Mat_goal")
+
+[node name="GoalAPostR" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.2, 1.22, -52.5)
+mesh = SubResource("BoxMesh_goal_post")
+material_override = SubResource("Mat_goal")
+
+[node name="GoalBPostL" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.2, 1.22, 52.5)
+mesh = SubResource("BoxMesh_goal_post")
+material_override = SubResource("Mat_goal")
+
+[node name="GoalBPostR" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.2, 1.22, 52.5)
+mesh = SubResource("BoxMesh_goal_post")
+material_override = SubResource("Mat_goal")
+
+[node name="MockBall" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
+
+[node name="MockBallMesh" type="MeshInstance3D" parent="MockBall"]
+mesh = SubResource("SphereMesh_ball")
+material_override = SubResource("Mat_ball")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.766, 0.643, 0, -0.643, 0.766, 0, 35, 55)
+fov = 50.0
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="ActiveLabel" type="Label" parent="HUD"]
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 700.0
+offset_bottom = 60.0
+theme_override_colors/font_color = Color(1, 1, 1, 0.95)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 18
+text = "ACTIVE: —"
+
+[node name="HelpLabel" type="Label" parent="HUD"]
+offset_left = 24.0
+offset_top = 60.0
+offset_right = 700.0
+offset_bottom = 200.0
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 14
+text = "WASD move   Shift sprint   Q switch player   Space charge (Sprint 7)   E pass (Sprint 7)
+ESC quit"
+
+[editable path="MockBall"]
