@@ -100,21 +100,29 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | S07-D06 | **Pass spin auto**: backspin `-3 rad/s` se `distance < 8 m` (grounder), topspin `+4 rad/s` se `> 15 m` (lob), zero in mezzo (S06-D28 riconferma). Riusa `BallLauncher.compose_spin`. | Da R03-F05 / R03-F06. Soglie 8/15 m discriminano grounder vs lob. |
 | S07-D07 | **Animation warping**: `VisualRoot` Node3D figlio Player con BodyMesh + FrontMarker; ruota istantaneamente (alpha 0.5/tick) verso `_facing_target`. CollisionShape resta a lerp slow esistente (rotation_speed 8). | Da R09-F04. Risolve "su rotaia" senza animazioni vere. Hitbox lento = no glitch fisici. |
 
-### Sprint 07 — Findings → Code Mapping (popolato a fine sprint, T08)
+### Sprint 07 — Findings → Code Mapping (T08 — VALIDATED)
 
 | Finding | File:func / commit | Status |
 |---------|--------------------|--------|
-| R02-F02 KINEMATIC freeze pattern | _TBD T01_ | _PENDING_ |
-| R02-F03 possession proximity + ball approaching | _TBD T02_ | _PENDING_ |
-| R02-F06 Godot 4 drag/drop recipe | _TBD T02_ | _PENDING_ |
-| R03-F01 input < 100 ms | already PlayerController buffer (S06) — re-validate S7 | _PENDING_ |
-| R03-F02 cubic t³ charge curve | _TBD T03_ | _PENDING_ |
-| R03-F03 instant velocity on release | _TBD T03_ | _PENDING_ |
-| R03-F05 dot-product 90° cone for pass target | _TBD T04_ | _PENDING_ |
-| R03-F06 reuse `BallLauncher.launch_to_point` + `compose_spin` | _TBD T04_ | _PENDING_ |
-| R09-F05 buffer + coyote (revalidate) | already PlayerController (S06) — apply to shoot/pass triggers S7 | _PENDING_ |
+| R02-F02 KINEMATIC freeze pattern | `BallPhysics.set_possessed` + `set_deferred("freeze", true)` + `freeze_mode = FREEZE_MODE_KINEMATIC`; integrator early-returns on `_possessed_by != null` (commit @ T01) | VALIDATED |
+| R02-F03 possession proximity 0.8 m + ball-approaching gate | `BallController._try_pickup`: `dx²+dz² ≤ 0.64` AND `|v|² ≤ 144`, GK excluded, post-release lockout 0.3 s (commit @ T02 + T05-fix2) | VALIDATED |
+| R02-F06 Godot 4 drag/drop recipe (carry pos-copy + impulse on release) | `BallController._sync_carry_position` writes `ball.global_position = carrier_pos + visual_basis * carry_offset` directly (KINEMATIC accepts direct writes; staged-pending pipeline only fires when integrator runs). Release via `BallPhysics.release` → `apply_launch_state` deferred. (commit @ T02 + T05-fix1) | VALIDATED |
+| R03-F01 input < 100 ms | shoot/pass roundtrip = 1 physics tick (8.3 ms) + deferred-freeze cycle ≤ 16 ms — within budget (re-validated @ T03) | VALIDATED |
+| R03-F02 cubic t³ charge curve | `ShootingController.charge_curve_exponent = 3.0`; `power_norm = pow(t_norm, 3.0)`; `speed = lerp(15, 30, power_norm)` (commit @ T03) | VALIDATED |
+| R03-F03 instant velocity on release | `ShootingController.fire_shot` → `BallController.request_release` → `BallPhysics.release` → `apply_launch_state` (1-tick deferred), no easing on release (commit @ T03) | VALIDATED |
+| R03-F05 dot-product 90° cone for pass target | `PassingController.cone_dot_threshold = 0.707`; nearest in cone, GK excluded; spin auto by distance (backspin <8m, topspin >15m, zero between) (commit @ T04) | VALIDATED |
+| R03-F06 reuse `BallLauncher.launch_to_point` + `compose_spin` | `BallLauncher.compute_velocity_to_point` extracted from `launch_to_point` for compute-only use; `PassingController.try_pass` uses solver + `compose_spin` for spin override (commit @ T04 + BallLauncher refactor) | VALIDATED |
+| R09-F05 buffer + coyote (re-validate) | `PassingController` consumes `&"pass_ball"` via `consume_buffered`; `ShootingController` polls `Input.is_action_pressed` for hold-charge (commit @ T03 / T04) | VALIDATED |
+| R09-F04 FIFA Animation Warping | `Player.start_facing_warp(dir, 0.15)` + `rotation_speed_warp = 50` boost window. Used by `BallController._assign_carrier` (on-pickup safety net) AND by `PassingController.try_pass` (receiver pre-orientation @ pass-fire). 99% facing convergence in ~110ms. (commit @ T05-fix5 + fix6) | VALIDATED |
+| R01-F07 FIFA HyperMotion visual/physics decoupling | `Player.tscn` adds `VisualRoot: Node3D` between CharacterBody3D and meshes; rotation lives on VisualRoot, collision capsule basis stays at identity. `Player.get_visual_basis()` / `get_visual_forward()` are canonical accessors. All ball-interaction code migrated. (commit @ T06) | VALIDATED |
 
 ### Sprint 07 — Calibration Sessions
 
 | Date       | Task   | Notes |
 |------------|--------|-------|
+| 2026-05-13 | T05-fix1 | Carry sync no-op bug — `teleport_to` stages `_pending_teleport` for `_integrate_forces`, but KINEMATIC-frozen RigidBody3D doesn't run the integrator. Switched carry sync to direct `ball.global_position` write. |
+| 2026-05-13 | T05-fix2 | Post-release pickup lockout 0.3 s — without it the same physics tick that fires `release()` re-runs `_try_pickup`, ball still at carry offset (within 0.8 m radius), instant re-grab wipes launch velocity. |
+| 2026-05-13 | T05-fix2 | Player snap-direction tuning — `accel` 20 → 50 m/s² fixes "ventaglio" (~0.4 s velocity reversal traced visible arc). `rotation_speed` 8 → 20 (~160 ms to 99 % facing). |
+| 2026-05-13 | T05-fix4-6 | Reception facing — first try `set_facing_immediate` (snap) read as scatto. Replaced with `start_facing_warp` per R09-F04 (warp 50 rad/s, ~110 ms). Then moved warp from on-pickup to **at-pass-fire** time on the targeted teammate (`receiver_prewarp_duration_s = 0.30`) for real-football realism. |
+| 2026-05-13 | T05-fix7 | Pass active-switch glitch — `TeamController._manual_override_remaining` (240 tick = 2 s) blocked autoswitch to receiver. `PassingController` now explicitly calls `team_controller.set_active(target_idx)` when the pass-anim window expires. Deterministic, no race with override. |
+| 2026-05-13 | T06   | VisualRoot decoupling validated against tests 1-5 (snap-on-direction-change, no jitter circular walk, carry-during-turn, front-marker readability, shoot/pass direction correct). Test 6 (post-pass receiver orientation) covered by fix5/fix6 warp. |
