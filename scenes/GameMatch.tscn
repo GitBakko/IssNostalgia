@@ -48,7 +48,6 @@ script = ExtResource("1_match")
 team_a_config = ExtResource("2_team_a")
 team_b_config = ExtResource("3_team_b")
 formation = ExtResource("4_formation")
-both_human = true
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1128717888]
 environment = SubResource("Env_match")
