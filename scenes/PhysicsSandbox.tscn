@@ -38,7 +38,7 @@ ball_path = NodePath("../Ball")
 
 [node name="ForceGizmo" parent="." unique_id=1673386513 instance=ExtResource("7_gizmo")]
 
-[node name="WetPatch" parent="." instance=ExtResource("8_wet")]
+[node name="WetPatch" parent="." unique_id=952275593 instance=ExtResource("8_wet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 8)
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1055643380]
@@ -59,6 +59,8 @@ H       horizontal +X     (20 m/s, topspin)
 2       Foglia morta      → mouse  (22 m/s @20°, backspin 6, sidespin 3)
 3       Rasoterra forte   → mouse  (30 m/s @1°,  topspin 4)
 4       Knuckleball       → mouse  (28 m/s @10°, ~zero spin)
+5       Rasoterra medio   → mouse  (15 m/s @3°,  topspin 4)
+6       Rasoterra debole  → mouse  (10 m/s @1°,  topspin 4)
 LMB     lob to clicked ground point
 RMB drag  orbit camera (yaw/pitch)
 wheel   zoom in / out

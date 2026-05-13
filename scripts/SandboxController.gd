@@ -167,6 +167,10 @@ func _tick_auto_launch() -> void:
 			_launcher.launch_dead_leaf()
 		"grounder":
 			_launcher.launch_grounder_topspin()
+		"grounder_medium":
+			_launcher.launch_grounder_medium()
+		"grounder_weak":
+			_launcher.launch_grounder_weak()
 		"knuckle":
 			_launcher.launch_knuckle()
 		_:
@@ -248,6 +252,10 @@ func _handle_key(event: InputEventKey) -> void:
 			if _launcher: _launcher.launch_grounder_topspin(_aim_direction())
 		KEY_4:
 			if _launcher: _launcher.launch_knuckle(_aim_direction())
+		KEY_5:
+			if _launcher: _launcher.launch_grounder_medium(_aim_direction())
+		KEY_6:
+			if _launcher: _launcher.launch_grounder_weak(_aim_direction())
 		KEY_F5:
 			_toggle_slowmo()
 		KEY_W:

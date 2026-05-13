@@ -123,6 +123,23 @@ func launch_grounder_topspin(direction: Vector3 = Vector3.RIGHT) -> void:
 	launch_at_angle(direction, 30.0, 1.0, spin)
 
 
+## Rasoterra medio toward `direction`. 15 m/s @ 3°, topspin 4 rad/s.
+## Skips slightly higher than the strong variant but stays under the
+## 6 cm ceiling locked in `test_rasoterra_levels.gd`.
+func launch_grounder_medium(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
+	launch_at_angle(direction, 15.0, 3.0, spin)
+
+
+## Rasoterra debole toward `direction`. 10 m/s @ 1°, topspin 4 rad/s.
+## Slow enough to actually roll through wet patches and feel the
+## friction drop — this is the variant to use to validate per-zone
+## surfaces visually.
+func launch_grounder_weak(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
+	launch_at_angle(direction, 10.0, 1.0, spin)
+
+
 ## Knuckleball toward `direction`. **30 m/s @ 6°**, near-zero spin.
 ##
 ## Trajectory intent (S05-A06): flat low parabola — the ball rises
@@ -160,15 +177,21 @@ func launch_horizontal(speed: float = -1.0, direction: Vector3 = Vector3.RIGHT,
 
 ## Aim the ball at `target_xz` (point on the ground plane). The arc
 ## height scales with launch distance (clamped to `[0.5 m, 6 m]`); the
-## horizontal speed is then derived from the closed-form ballistic
-## solution so the ball actually lands at the target. Drag and Magnus
-## are ignored here — close enough for sandbox lobs at moderate speeds.
+## horizontal speed is then iteratively refined against the live
+## integrator so the ball actually lands on the click.
 ##
 ## Spin is set to ZERO. A naïve "topspin lob" (S02-A12 fallback) caused
 ## Magnus to pull the ball backwards during descent: with ω̂ = (0,0,-1)
 ## and v̂ pointing down-and-forward, ω̂ × v̂ produces a negative-X
 ## component, decelerating and even reversing forward motion. A
 ## spinless lob lands cleanly on the click.
+##
+## Why iterative (S05-fix): at long range the vacuum solution overshoots
+## by 10-30%. Horizontal speed enters the drag-crisis band (Cd≈0.18 for
+## 14-24 m/s), so actual deceleration is far weaker than a single fixed
+## undershoot factor can compensate. We bracket v_horizontal by running
+## `predict_forward` (the same integrator the live ball uses), measuring
+## the simulated landing distance, and rescaling. Converges in 3-4 iters.
 func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 		arc_height_override: float = -1.0) -> void:
 	if _ball == null:
@@ -183,9 +206,41 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.25, 0.5, 6.0)
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var t_flight: float = 2.0 * v_vertical / 9.81
-	# 0.92 empirical undershoot factor: drag at sandbox lob speeds (4-25 m/s)
-	# is hard to invert in closed form. Slight conservative bias means the
-	# ball never overshoots the click; if it lands a tiny bit short, the
-	# user can still see where the click was relative to the impact mark.
-	var v_horizontal: float = dist / t_flight * 0.92
+	var v_horizontal: float = dist / t_flight   # vacuum guess
+	for _i in 4:
+		var v0: Vector3 = dir * v_horizontal + Vector3.UP * v_vertical
+		var landing: float = _simulated_landing_distance(origin, v0)
+		if landing <= 0.5:
+			break
+		var ratio: float = dist / landing
+		if absf(ratio - 1.0) < 0.01:
+			break
+		v_horizontal *= ratio
 	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)
+
+
+## Drag-aware landing distance for the iterative lob solver. Uses
+## `BallPhysics.predict_forward` so gravity, quadratic drag, Magnus and
+## the drag-crisis Cd(v) curve all match the live integrator exactly.
+## Returns the horizontal (XZ) distance from `p0` to the first descent
+## crossing of ground level; falls back to the last simulated point if
+## the trajectory hasn't landed within ~5 s.
+func _simulated_landing_distance(p0: Vector3, v0: Vector3) -> float:
+	if _ball == null:
+		return 0.0
+	const SUB_DT: float = 1.0 / 240.0
+	const STEPS: int = 1200
+	var positions: PackedVector3Array = _ball.predict_forward(
+		p0, v0, Vector3.ZERO, 0.0, STEPS, SUB_DT)
+	var ground_y: float = p0.y
+	var ascended: bool = false
+	for i in STEPS:
+		var p: Vector3 = positions[i]
+		if not ascended:
+			if p.y > ground_y + 0.3:
+				ascended = true
+			continue
+		if p.y <= ground_y + 0.05:
+			return Vector2(p.x - p0.x, p.z - p0.z).length()
+	var p_end: Vector3 = positions[STEPS - 1]
+	return Vector2(p_end.x - p0.x, p_end.z - p0.z).length()
