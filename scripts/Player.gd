@@ -148,6 +148,21 @@ func is_busy_with_ball_action() -> bool:
 	return state == State.SHOOTING or state == State.PASSING
 
 
+## Snap the visual facing AND the rotation target to a direction now —
+## bypasses the slerp from `update_facing`. Used by BallController when
+## a player receives a pass: the carry offset is in the player's local
+## forward, so without this snap the ball would visually attach behind
+## or to the side of the receiver depending on their stale facing.
+## Direction is XZ-only; Y is dropped. No-op on near-zero input.
+func set_facing_immediate(direction: Vector3) -> void:
+	var planar: Vector3 = Vector3(direction.x, 0.0, direction.z)
+	if planar.length_squared() < INPUT_DEAD_ZONE_SQ:
+		return
+	planar = planar.normalized()
+	_facing_target = planar
+	transform.basis = Basis.looking_at(planar, Vector3.UP)
+
+
 # ---- Lifecycle ----------------------------------------------------------
 
 func _physics_process(delta: float) -> void:

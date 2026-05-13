@@ -207,6 +207,36 @@ func test_pickup_locked_out_immediately_after_release() -> void:
 		"Lockout must block pickup on the same physics tick as release")
 
 
+func test_receiver_snaps_facing_toward_incoming_ball() -> void:
+	# Receiver at origin facing -Z (default). Ball arrives moving in +X.
+	# After pickup, receiver should face -X (TOWARD the passer / incoming
+	# ball) so the CARRY_OFFSET drops the ball at the foot on the
+	# passer-side, not behind the receiver.
+	players_a[0].global_position = Vector3.ZERO
+	players_a[0].transform.basis = Basis.IDENTITY  ## faces -Z
+	ball.global_position = Vector3(0.4, 0.0, 0.0)
+	ball.linear_velocity = Vector3(8.0, 0.0, 0.0)  ## ball moving +X
+	bc.step(0.0)  ## triggers _try_pickup → _assign_carrier
+	assert_eq(bc.get_carrier(), players_a[0], "Sanity: pickup fired")
+	# Player local -Z (forward) should now point in -X.
+	var forward: Vector3 = -players_a[0].transform.basis.z
+	assert_almost_eq(forward.x, -1.0, 1.0e-3,
+		"Receiver must face TOWARD the incoming ball (against ball.linear_velocity)")
+	assert_almost_eq(forward.z, 0.0, 1.0e-3, "Facing must be planar")
+
+
+func test_receiver_keeps_facing_when_ball_at_rest() -> void:
+	# Ball at rest → no orientation snap (first pickup, restarts).
+	players_a[0].global_position = Vector3.ZERO
+	players_a[0].transform.basis = Basis.IDENTITY  ## faces -Z
+	ball.global_position = Vector3(0.4, 0.0, 0.0)
+	ball.linear_velocity = Vector3.ZERO
+	bc.step(0.0)
+	var forward: Vector3 = -players_a[0].transform.basis.z
+	assert_almost_eq(forward.z, -1.0, 1.0e-3,
+		"Ball at rest must NOT snap the receiver's facing")
+
+
 func test_pickup_resumes_after_lockout_expires() -> void:
 	bc._assign_carrier(players_a[0])
 	bc.request_release(Vector3(20.0, 0.0, 0.0))

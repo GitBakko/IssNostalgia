@@ -181,6 +181,14 @@ func _assign_carrier(player: Player) -> void:
 		_clear_carrier_flag()
 	_carrier = player
 	_carrier.has_ball = true
+	# Reception facing snap: orient the receiver TOWARD the incoming
+	# ball (= -ball.linear_velocity) so the carry offset (in the
+	# player's local forward, -Z) places the ball at the player's foot
+	# on the passer-side, not at their stale forward. No-op when the
+	# ball is at rest (first pickup, dead-ball restarts).
+	var ball_vel: Vector3 = ball.linear_velocity
+	if ball_vel.length_squared() > 0.01:
+		player.set_facing_immediate(-ball_vel)
 	ball.set_possessed(player)
 
 
