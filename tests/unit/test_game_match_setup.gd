@@ -104,20 +104,76 @@ func test_hud_label_updates_with_active_player() -> void:
 
 func test_mock_ball_present_at_origin_height() -> void:
 	var m: GameMatch = scene_root as GameMatch
-	assert_not_null(m.mock_ball, "MockBall must be wired")
-	assert_almost_eq(m.mock_ball.global_position.y, 0.11, 1.0e-3,
-		"MockBall sits at ball-radius height (no physics yet, just visual)")
+	assert_not_null(m.ball, "Ball must be wired")
+	assert_almost_eq(m.ball.global_position.y, 0.11, 1.0e-3,
+		"Ball sits at ball-radius height on spawn")
+
+
+# ---- T05 — real Ball.tscn integration -----------------------------------
+
+func test_real_ball_is_ballphysics_instance() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	assert_true(m.ball is BallPhysics,
+		"Ball node must be a BallPhysics RigidBody3D (real Ball.tscn)")
+	assert_not_null(m.ball.config,
+		"BallPhysics must carry a PhysicsConfig from the .tscn")
+
+
+func test_ball_controller_wired() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	assert_not_null(m.ball_controller, "BallController must be spawned")
+	assert_eq(m.ball_controller.ball, m.ball,
+		"BallController.ball must point at the scene Ball")
+	assert_eq(m.ball_controller.teams.size(), 2,
+		"BallController must arbitrate between both teams")
+
+
+func test_shoot_pass_controllers_wired_team_a_only_when_ai_b() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	assert_not_null(m.team_a_shooter, "Team A ShootingController must spawn")
+	assert_not_null(m.team_a_passer, "Team A PassingController must spawn")
+	assert_eq(m.team_a_shooter.team_controller, m.team_a_ctrl)
+	assert_eq(m.team_a_shooter.ball_controller, m.ball_controller)
+	assert_eq(m.team_a_passer.ball_launcher, m.ball_launcher)
+	# both_human=false → Team B has no shoot/pass controllers
+	assert_null(m.team_b_shooter,
+		"Team B must NOT have a ShootingController when AI-driven")
+	assert_null(m.team_b_passer,
+		"Team B must NOT have a PassingController when AI-driven")
+
+
+func test_both_human_spawns_team_b_shoot_pass() -> void:
+	var m: GameMatch = _spawn_match(true)
+	assert_not_null(m.team_b_shooter,
+		"both_human=true must spawn Team B ShootingController")
+	assert_not_null(m.team_b_passer,
+		"both_human=true must spawn Team B PassingController")
+	assert_eq(m.team_b_shooter.team_controller, m.team_b_ctrl)
+	assert_eq(m.team_b_passer.team_controller, m.team_b_ctrl)
+
+
+func test_ball_launcher_wired_to_ball() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	assert_not_null(m.ball_launcher, "BallLauncher must spawn")
+	assert_eq(m.ball_launcher.ball_path, m.ball.get_path(),
+		"BallLauncher.ball_path must point at the scene Ball")
 
 
 # ---- T06 — debug ball move + both_human ---------------------------------
 
 func test_debug_move_ball_relative_updates_position() -> void:
 	var m: GameMatch = scene_root as GameMatch
-	var p0: Vector3 = m.mock_ball.global_position
+	# Let the ball settle from spawn before sampling (pending_teleport from
+	# scene_root spawn applies on first physics tick).
+	await get_tree().physics_frame
+	var p0: Vector3 = m.ball.global_position
 	m.move_ball_relative(2.0, -3.0)
-	assert_almost_eq(m.mock_ball.global_position.x, p0.x + 2.0, 1.0e-3)
-	assert_almost_eq(m.mock_ball.global_position.z, p0.z - 3.0, 1.0e-3)
-	assert_almost_eq(m.mock_ball.global_position.y, p0.y, 1.0e-3,
+	# teleport_to stages a pending position applied inside the integrator;
+	# wait one physics tick for it to land.
+	await get_tree().physics_frame
+	assert_almost_eq(m.ball.global_position.x, p0.x + 2.0, 1.0e-3)
+	assert_almost_eq(m.ball.global_position.z, p0.z - 3.0, 1.0e-3)
+	assert_almost_eq(m.ball.global_position.y, p0.y, 1.0e-3,
 		"Y stays at ball-radius height (debug move is XZ only)")
 
 
@@ -127,7 +183,8 @@ func test_debug_random_ball_inside_field_bounds() -> void:
 	# half-field bounds.
 	for _i in 20:
 		m.randomize_ball_position()
-		var p: Vector3 = m.mock_ball.global_position
+		await get_tree().physics_frame
+		var p: Vector3 = m.ball.global_position
 		assert_lte(absf(p.x), m.debug_ball_field_half_x + 1.0e-3,
 			"Random ball X must respect debug_ball_field_half_x cap")
 		assert_lte(absf(p.z), m.debug_ball_field_half_z + 1.0e-3,
