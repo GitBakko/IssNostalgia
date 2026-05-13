@@ -159,6 +159,56 @@ func test_ball_launcher_wired_to_ball() -> void:
 		"BallLauncher.ball_path must point at the scene Ball")
 
 
+# ---- T01 (S08) — camera follow ------------------------------------------
+
+func test_camera_rig_present_with_camera_child() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	assert_not_null(m.camera_rig, "CameraRig Node3D must be wired")
+	var cam: Camera3D = m.camera_rig.get_node_or_null(^"Camera3D") as Camera3D
+	assert_not_null(cam,
+		"Camera3D must be a child of CameraRig (rig translates, camera keeps offset)")
+
+
+func test_camera_rig_follows_weighted_centroid_after_steps() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	# Force ball + active player to known positions, then tick until
+	# the rig converges. Initial rig position is (0,0,0) per .tscn.
+	await get_tree().physics_frame
+	m.ball.teleport_to(Vector3(20.0, 0.11, -10.0))
+	m.players_a[0].global_position = Vector3(10.0, 0.0, -20.0)
+	# Wait one physics frame so the staged teleport actually lands.
+	await get_tree().physics_frame
+	# Many small _process ticks to let the FR-independent lerp converge.
+	for _i in 200:
+		m._update_camera(1.0 / 60.0)
+	# Expected centroid (0.6 ball + 0.4 player):
+	#   x = 20*0.6 + 10*0.4 = 16
+	#   z = -10*0.6 + -20*0.4 = -14
+	assert_almost_eq(m.camera_rig.global_position.x, 16.0, 0.5,
+		"CameraRig X must converge to weighted centroid X")
+	assert_almost_eq(m.camera_rig.global_position.z, -14.0, 0.5,
+		"CameraRig Z must converge to weighted centroid Z")
+	assert_almost_eq(m.camera_rig.global_position.y, 0.0, 1.0e-3,
+		"CameraRig Y stays on the pitch plane")
+
+
+func test_camera_rig_clamped_to_bounds() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	# Drag both ball and player far past the bounds — rig must clamp.
+	await get_tree().physics_frame
+	m.ball.teleport_to(Vector3(200.0, 0.11, 200.0))
+	m.players_a[0].global_position = Vector3(200.0, 0.0, 200.0)
+	await get_tree().physics_frame
+	for _i in 200:
+		m._update_camera(1.0 / 60.0)
+	assert_almost_eq(m.camera_rig.global_position.x,
+		m.camera_bounds_half_x_m, 1.0e-3,
+		"CameraRig X must clamp to +camera_bounds_half_x_m")
+	assert_almost_eq(m.camera_rig.global_position.z,
+		m.camera_bounds_half_z_m, 1.0e-3,
+		"CameraRig Z must clamp to +camera_bounds_half_z_m")
+
+
 # ---- T06 — debug ball move + both_human ---------------------------------
 
 func test_debug_move_ball_relative_updates_position() -> void:

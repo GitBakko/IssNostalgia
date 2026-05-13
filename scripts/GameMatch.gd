@@ -24,6 +24,22 @@ const PLAYER_SCENE: PackedScene = preload("res://scenes/Player.tscn")
 ## debug code reference it as `ball`.
 @onready var ball: BallPhysics = $Ball
 @onready var hud_active_label: Label = $HUD/ActiveLabel
+@onready var camera_rig: Node3D = $CameraRig
+
+@export_group("Camera follow (R06-F01/F04/F06 — minimal Sprint 8 cut)")
+## Weighted centroid: ball weight + active player weight = 1. R06-F01
+## Game Camera Systems Guide 2025 default 0.6/0.4 (sports tradition).
+@export_range(0.0, 1.0, 0.05) var camera_ball_weight: float = 0.6
+## FR-independent lerp decay per second. `1 - pow(decay, delta * 60)`
+## yields the per-frame alpha. R06-F06 — same response 30/60/120 fps.
+## 0.94 ≈ 0.3 s catch-up at 60 fps; lower = snappier.
+@export_range(0.5, 0.999, 0.001) var camera_lerp_decay: float = 0.94
+## Bounds clamp half-extents (X = side, Z = goal-line). Pitch is 105×68
+## with origin centred → ±52.5 X / ±34 Z. We keep the rig 2.5-4 m inside
+## so the camera frustum doesn't drift over the boundary fence (R06-F04
+## bounds AFTER lerp).
+@export var camera_bounds_half_x_m: float = 50.0
+@export var camera_bounds_half_z_m: float = 30.0
 
 @export_group("Debug")
 ## When true, Team B is also human-driven via the `p2_*` action set
@@ -172,11 +188,47 @@ func _instantiate_players(root: Node3D, team: TeamConfig, mirror_z: bool) -> Arr
 
 # ---- HUD -----------------------------------------------------------------
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_update_hud()
 	_handle_debug_ball_input()
+	_update_camera(delta)
 	if Input.is_action_just_pressed(&"ui_cancel"):
 		get_tree().quit()
+
+
+# ---- Camera follow (R06-F01/F04/F06) -------------------------------------
+
+## Weighted centroid follow with bounds clamp post-lerp. The Camera3D is
+## a child of `CameraRig` with a fixed local offset (0, 35, 55) +
+## look-down rotation — moving the rig translates the camera while
+## keeping the framing angle. Sprint 9 will add dead zone, lookahead,
+## SpringArm collision, zoom — this is the minimal Sprint 8 cut.
+func _update_camera(delta: float) -> void:
+	if camera_rig == null or ball == null:
+		return
+	var active: Player = team_a_player_ctrl.player if team_a_player_ctrl else null
+	var player_pos: Vector3 = active.global_position if active != null else ball.global_position
+	# XZ-only weighted centroid — Y stays at 0 (rig rides on the pitch).
+	var ball_pos: Vector3 = ball.global_position
+	var w_b: float = clampf(camera_ball_weight, 0.0, 1.0)
+	var w_p: float = 1.0 - w_b
+	var target: Vector3 = Vector3(
+		ball_pos.x * w_b + player_pos.x * w_p,
+		0.0,
+		ball_pos.z * w_b + player_pos.z * w_p,
+	)
+	# FR-independent lerp (R06-F06): 1 - pow(decay, delta * 60). At
+	# delta = 1/60 the per-frame alpha = 1 - decay; at higher / lower
+	# fps the response time stays constant.
+	var alpha: float = 1.0 - pow(camera_lerp_decay, delta * 60.0)
+	var current: Vector3 = camera_rig.global_position
+	current = current.lerp(target, alpha)
+	# Bounds clamp AFTER lerp (R06-F04) so the camera doesn't tween
+	# through the fence on a fast pan.
+	current.x = clampf(current.x, -camera_bounds_half_x_m, camera_bounds_half_x_m)
+	current.z = clampf(current.z, -camera_bounds_half_z_m, camera_bounds_half_z_m)
+	current.y = 0.0
+	camera_rig.global_position = current
 
 
 # ---- Debug ball-move helpers (T06) ---------------------------------------
