@@ -67,8 +67,16 @@ func cycle_active_outfield() -> void:
 	if players.is_empty():
 		return
 	var n: int = players.size()
+	# Diagnostic dump on first call to see what flags actually look like.
+	print("[TeamCtrl cycle] active_index=%d, n=%d" % [active_index, n])
+	for i in range(n):
+		print("  players[%d] = %s, is_goalkeeper=%s" % [
+			i, players[i].name, players[i].is_goalkeeper])
 	for offset in range(1, n + 1):
 		var candidate: int = (active_index + offset) % n
+		print("  try offset=%d candidate=%d (%s) gk=%s" % [
+			offset, candidate, players[candidate].name,
+			players[candidate].is_goalkeeper])
 		if not players[candidate].is_goalkeeper:
 			_commit_switch(candidate)
 			return
