@@ -7,7 +7,9 @@ extends GutTest
 ## no skip higher than ~4 cm. We assert a slightly looser 6 cm ceiling
 ## so per-position grass roughness noise doesn't false-fail the test.
 ##
-##   strong   30 m/s @ 1° — validated visually Sprint 2 (S02-A14)
+##   strong   40 m/s @ 1° — bumped from 30 m/s after S05 custom-integrator
+##                          2× bug fix; matches the visual half-field run
+##                          the user originally calibrated against
 ##   medium   15 m/s @ 3° — intermediate, not previously locked
 ##   low      10 m/s @ 1° — was [PENDING] from Sprint 2, this test
 ##                          closes the deferral
@@ -79,10 +81,10 @@ func _max_skip(speed: float, elev_deg: float) -> float:
 
 
 func test_rasoterra_strong() -> void:
-	var skip: float = _max_skip(30.0, 1.0)
+	var skip: float = _max_skip(40.0, 1.0)
 	print("[rasoterra strong] max bottom-above-ground = %.3f m (cap %.2f m)" % [skip, SKIP_CEILING])
 	assert_lte(skip, SKIP_CEILING,
-		"Strong rasoterra (30 m/s @ 1°) skip %.3f m > %.2f m" % [skip, SKIP_CEILING])
+		"Strong rasoterra (40 m/s @ 1°) skip %.3f m > %.2f m" % [skip, SKIP_CEILING])
 
 
 func test_rasoterra_medium() -> void:

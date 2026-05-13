@@ -115,12 +115,17 @@ func launch_dead_leaf(direction: Vector3 = Vector3.RIGHT) -> void:
 	launch_at_angle(direction, 22.0, 20.0, spin)
 
 
-## Rasoterra forte toward `direction`. 30 m/s @ 1° low arc, topspin 4 rad/s.
+## Rasoterra forte toward `direction`. 40 m/s @ 1° low arc, topspin 4 rad/s.
 ## The 1° elevation keeps the launch flat; topspin gives a downward
-## Magnus force that helps the ball glue to the surface.
+## Magnus force that helps the ball glue to the surface. Speed bumped
+## from 30 m/s after the custom-integrator 2× bug was fixed (S05-FIX):
+## the previous 30 m/s value had been visually calibrated when the
+## ball was secretly travelling twice the integrated distance, so the
+## real ground-truth speed required for a half-field grounder is the
+## higher of the two.
 func launch_grounder_topspin(direction: Vector3 = Vector3.RIGHT) -> void:
 	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
-	launch_at_angle(direction, 30.0, 1.0, spin)
+	launch_at_angle(direction, 40.0, 1.0, spin)
 
 
 ## Rasoterra medio toward `direction`. 15 m/s @ 3°, topspin 4 rad/s.
@@ -203,24 +208,22 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 	if dist < 0.001:
 		return
 	var dir: Vector3 = horizontal / dist
-	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.25, 0.5, 6.0)
+	# Arc height: scaled to make medium / long lobs look like real
+	# football crosses — apex 8-12 m, not a flat laser pass. A "low
+	# pinpoint" pass is a separate skill (deferred to Phase 2 controls).
+	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.40, 1.5, 12.0)
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var t_flight: float = 2.0 * v_vertical / 9.81
 	var v_horizontal: float = dist / t_flight   # vacuum guess
-	print("[lob solver] origin=%s target=%s dist=%.2f h=%.2f vy=%.2f v_h_vacuum=%.2f knuckle_was=%s" % [
-		origin, target_xz, dist, h, v_vertical, v_horizontal, _ball.is_knuckle_active()])
-	for it in 4:
+	for _i in 4:
 		var v0: Vector3 = dir * v_horizontal + Vector3.UP * v_vertical
 		var landing: float = _simulated_landing_distance(origin, v0)
-		print("[lob solver] iter %d v_h=%.3f predicted_landing=%.3f ratio=%.3f" % [
-			it, v_horizontal, landing, dist / landing if landing > 0.1 else 0.0])
 		if landing <= 0.5:
 			break
 		var ratio: float = dist / landing
 		if absf(ratio - 1.0) < 0.01:
 			break
 		v_horizontal *= ratio
-	print("[lob solver] FINAL v_h=%.3f vy=%.3f → launching" % [v_horizontal, v_vertical])
 	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)
 
 
