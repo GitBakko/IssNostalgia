@@ -330,25 +330,24 @@ func test_touch_skipped_when_carrier_almost_still() -> void:
 		"Carrier almost still → no touch emitted, still carrying")
 
 
-func test_touch_release_kind_skips_lockout() -> void:
-	# Same-tick race: touch release → BallController.step pickup attempt
-	# must succeed (no lockout) so the carrier instantly re-acquires
-	# at the next physics tick instead of stalling.
+func test_touch_release_uses_short_lockout() -> void:
+	# Touch arms a SHORT lockout (default 0.1 s) — long enough for the
+	# 1.5 × boost to clear the 0.8 m pickup radius. SHOOT/PASS still
+	# use the longer post_release_lockout_s (0.3 s).
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
 	bc._assign_carrier(p)
 	bc.step(bc.touch_interval_sprint_s + 0.01)  ## crosses interval
 	assert_null(bc.get_carrier(), "Touch fired")
-	# No lockout → pickup gate is open; bring carrier next to ball
-	# (in a real frame the carrier closes the distance via velocity;
-	# here we set it explicitly to drive the pickup synchronously).
+	# Lockout is the SHORT touch one — much less than SHOOT's 0.3 s.
+	assert_almost_eq(bc._pickup_lockout_remaining_s, bc.touch_lockout_s, 5.0e-2,
+		"Touch must use touch_lockout_s (short), not post_release_lockout_s")
+	# After draining the short lockout, pickup is eligible again.
 	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.5)
-	# Ball still has launch velocity but well within pickup speed gate
-	# (player walk = 5.5, sprint = 8 → < 12 m/s gate).
-	bc.step(0.0)
+	bc.step(bc.touch_lockout_s + 0.01)
 	assert_eq(bc.get_carrier(), p,
-		"Touch release must NOT arm pickup lockout — carrier re-grabs")
+		"After short touch lockout drains, carrier re-grabs")
 
 
 func test_touch_self_pickup_does_not_warp_facing() -> void:
@@ -368,7 +367,8 @@ func test_touch_self_pickup_does_not_warp_facing() -> void:
 	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.3)
 	# Reset warp state so we can detect any new warp armed by pickup.
 	p._facing_warp_remaining_s = 0.0
-	bc.step(0.0)
+	# Drain the short touch lockout so pickup is eligible.
+	bc.step(bc.touch_lockout_s + 0.01)
 	assert_eq(bc.get_carrier(), p, "Carrier re-acquires after touch")
 	assert_eq(p._facing_warp_remaining_s, 0.0,
 		"Self-pickup after TOUCH must NOT arm a facing warp")

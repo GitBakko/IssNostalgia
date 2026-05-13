@@ -62,11 +62,22 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## Vertical offset from the capsule centre (always negative — capsule
 ## centre sits at y≈0.9, ball-target lands at ankle height).
 @export var carry_offset_y_m: float = -0.7
-## Ratio applied to the carrier's velocity when emitting a TOUCH release
-## (S08-T02). Elite range from R02-F04 is 0.88-0.95; default 0.95.
-## Unused in T01; declared here so T02 can land without further export
-## reshuffling.
-@export var ball_speed_ratio_on_touch: float = 0.95
+## Boost factor applied to the carrier's velocity when emitting a TOUCH
+## release (S08-T02). Must be > 1.0 — the ball needs to OUTRUN the
+## carrier briefly so it clears the 0.8 m pickup radius and the touch
+## reads visually. R02-F04's 0.88-0.95 figure refers to STEADY-STATE
+## carry speed (player retains 95 % sprint with ball); the touch
+## impulse is a different physical quantity. Default 1.5 → at sprint
+## (8 m/s) the ball leaves at 12 m/s, drag bleeds it back below sprint
+## speed in ~0.3 s, carrier catches up and re-acquires.
+@export var ball_speed_ratio_on_touch: float = 1.5
+## Brief pickup lockout for TOUCH releases — separate from the long
+## SHOOT/PASS lockout. Without this the ball is still inside the
+## carrier's pickup radius the very next tick (carry offset ≈ 0.65 m
+## < 0.8 m radius) and the dribble silently no-ops. 0.1 s = ~12 ticks
+## at 120 Hz, enough for a 1.5 × velocity boost to push the ball past
+## the radius.
+@export var touch_lockout_s: float = 0.1
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -131,7 +142,11 @@ func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
 	_last_release_kind = kind
 	_clear_carrier_flag()
 	_carrier = null
-	if kind != ReleaseKind.TOUCH:
+	# SHOOT/PASS use the long anti re-grab lockout; TOUCH uses a short
+	# one just long enough to let the impulse clear the pickup radius.
+	if kind == ReleaseKind.TOUCH:
+		_pickup_lockout_remaining_s = touch_lockout_s
+	else:
 		_pickup_lockout_remaining_s = post_release_lockout_s
 	# Reset the touch timer so the next pickup starts fresh.
 	_touch_timer_s = 0.0
