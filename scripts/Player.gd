@@ -64,8 +64,16 @@ const INPUT_DEAD_ZONE_SQ: float = 1.0e-4
 ## Optional front marker (small BoxMesh) used in Phase 2 to make the
 ## capsule's facing direction readable. Auto-coloured to team primary
 ## colour darkened, so it stays visible against the body.
-@export var front_marker_path: NodePath = ^"FrontMarker"
-@export var body_mesh_path: NodePath = ^"BodyMesh"
+## Paths are relative to the VisualRoot node (S07-T06): both meshes
+## now live under `VisualRoot/` so a single rotation on `visual_root`
+## moves the body + marker together while leaving the CharacterBody3D
+## (collision capsule) at identity. R09-F04 / R01-F07 visual-vs-physics
+## decoupling pattern — keeps the rotationally-symmetric capsule
+## untouched and isolates the future animated mesh work.
+@export var front_marker_path: NodePath = ^"VisualRoot/FrontMarker"
+@export var body_mesh_path: NodePath = ^"VisualRoot/BodyMesh"
+## Path to the visual root node — every facing rotation writes here.
+@export var visual_root_path: NodePath = ^"VisualRoot"
 
 # ---- Runtime state -------------------------------------------------------
 var state: State = State.IDLE
@@ -73,6 +81,7 @@ var stamina: float = STAMINA_FULL
 var _facing_target: Vector3 = Vector3.FORWARD
 var _body_mesh: MeshInstance3D
 var _front_marker: MeshInstance3D
+var _visual_root: Node3D
 ## Set true by `apply_movement_step()`; consumed (and reset) at the end of
 ## `_physics_process`. When false we auto-apply a zero-input drive step so
 ## an inactive player decelerates to a stop instead of coasting on its
@@ -89,6 +98,7 @@ var _facing_warp_remaining_s: float = 0.0
 
 
 func _ready() -> void:
+	_visual_root = get_node_or_null(visual_root_path) as Node3D
 	_body_mesh = get_node_or_null(body_mesh_path) as MeshInstance3D
 	_front_marker = get_node_or_null(front_marker_path) as MeshInstance3D
 	_apply_team_colour()
@@ -150,6 +160,8 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 func update_facing(dt: float) -> void:
 	if _facing_target.length_squared() < INPUT_DEAD_ZONE_SQ:
 		return
+	if _visual_root == null:
+		return  ## scene set up without VisualRoot — nothing to rotate
 	var rate: float = rotation_speed
 	if _facing_warp_remaining_s > 0.0:
 		rate = rotation_speed_warp
@@ -157,17 +169,40 @@ func update_facing(dt: float) -> void:
 	# Basis.looking_at: -Z (model forward) points at the target direction.
 	# Capsule is symmetric on Y, but the front marker mesh exposes the
 	# direction so the player isn't visually a featureless pill.
+	# Rotate the VisualRoot ONLY — the CharacterBody3D collision capsule
+	# stays at identity (R09-F04 / R01-F07 visual-vs-physics decoupling).
 	var target_basis: Basis = Basis.looking_at(_facing_target, Vector3.UP)
 	# alpha = 1 - 0.5^(rate * dt). Frame-rate independent — same response
 	# at 30/60/120 fps. Baseline 20: 99 % in ~160 ms. Warp 50: 99 % in ~110 ms.
 	var alpha: float = 1.0 - pow(0.5, rate * dt)
-	transform.basis = transform.basis.slerp(target_basis, alpha)
+	_visual_root.transform.basis = _visual_root.transform.basis.slerp(target_basis, alpha)
 
 
 ## True iff the player is currently in an animation state that should block
 ## auto-switch (TeamController consults this — see S06 spec A2).
 func is_busy_with_ball_action() -> bool:
 	return state == State.SHOOTING or state == State.PASSING
+
+
+## Visual basis (VisualRoot.transform.basis) — the basis everything ball-
+## interaction-related reads: pass cones, shot direction, carry offset.
+## Falls back to the player's own basis if VisualRoot wasn't found, so
+## scenes that haven't migrated to T06 still work.
+func get_visual_basis() -> Basis:
+	if _visual_root != null:
+		return _visual_root.transform.basis
+	return transform.basis
+
+
+## Visual forward direction (= -visual_basis.z, planar). Convenience for
+## consumers that only need a direction vector.
+func get_visual_forward() -> Vector3:
+	var b: Basis = get_visual_basis()
+	var f: Vector3 = -b.z
+	f.y = 0.0
+	if f.length_squared() < 1.0e-6:
+		return Vector3.FORWARD
+	return f.normalized()
 
 
 ## Snap the visual facing AND the rotation target to a direction now —
@@ -182,7 +217,8 @@ func set_facing_immediate(direction: Vector3) -> void:
 		return
 	planar = planar.normalized()
 	_facing_target = planar
-	transform.basis = Basis.looking_at(planar, Vector3.UP)
+	if _visual_root != null:
+		_visual_root.transform.basis = Basis.looking_at(planar, Vector3.UP)
 
 
 ## Turn toward `direction` over a brief warp window — uses the boosted

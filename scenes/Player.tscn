@@ -28,10 +28,12 @@ rotation_speed = 20.0
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape_body")
 
-[node name="BodyMesh" type="MeshInstance3D" parent="."]
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="BodyMesh" type="MeshInstance3D" parent="VisualRoot"]
 mesh = SubResource("CapsuleMesh_body")
 material_override = SubResource("Mat_default")
 
-[node name="FrontMarker" type="MeshInstance3D" parent="."]
+[node name="FrontMarker" type="MeshInstance3D" parent="VisualRoot"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -0.5)
 mesh = SubResource("BoxMesh_marker")

@@ -178,12 +178,9 @@ func _reset_charge() -> void:
 ## zero the result collapses to player facing. Always normalised before
 ## use; an all-zero result falls back to the player's forward axis.
 func _resolve_shot_direction(shooter: Player, dir_input: Vector3) -> Vector3:
-	var facing: Vector3 = -shooter.transform.basis.z  # -Z is "forward" for the model
-	facing.y = 0.0
-	if facing.length_squared() < 1.0e-4:
-		facing = Vector3.FORWARD
-	else:
-		facing = facing.normalized()
+	# Use VisualRoot facing (S07-T06): the shot goes in the direction the
+	# RENDERED player is pointing, not the always-identity collision basis.
+	var facing: Vector3 = shooter.get_visual_forward()
 	var input_xz: Vector3 = Vector3(dir_input.x, 0.0, dir_input.z)
 	var combined: Vector3 = facing * 0.6 + input_xz * 0.4
 	if combined.length_squared() < 1.0e-4:

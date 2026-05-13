@@ -226,9 +226,10 @@ func test_pass_arms_facing_warp_on_target_receiver() -> void:
 		"Pass-fire must arm a facing warp on the target receiver")
 	# After ~150 ms of update_facing the receiver should be looking
 	# (mostly) toward the passer (+Z direction in this fixture).
+	# S07-T06: read VisualRoot facing, not the CharacterBody3D basis.
 	for _i in 18:
 		players_a[1].update_facing(1.0 / 120.0)
-	var forward: Vector3 = -players_a[1].transform.basis.z
+	var forward: Vector3 = players_a[1].get_visual_forward()
 	assert_almost_eq(forward.z, 1.0, 0.05,
 		"Receiver must end up facing toward the passer (+Z here)")
 
@@ -263,7 +264,7 @@ func test_pass_does_not_warp_anyone_on_fallback() -> void:
 	active.global_position = Vector3.ZERO
 	for i in [1, 2, 3, 4]:
 		players_a[i].global_position = Vector3(0.0, 0.0, +50.0)
-		players_a[i].transform.basis = Basis.IDENTITY
+		players_a[i].get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
 	pc.try_pass()
 	for i in [1, 2, 3, 4]:
 		assert_eq(players_a[i]._facing_warp_remaining_s, 0.0,

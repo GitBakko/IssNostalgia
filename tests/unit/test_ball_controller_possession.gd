@@ -214,7 +214,9 @@ func test_receiver_starts_facing_warp_toward_incoming_ball() -> void:
 	# we don't snap basis on the same tick (would read as a scatto;
 	# R09-F04 FIFA Animation Warping pattern).
 	players_a[0].global_position = Vector3.ZERO
-	players_a[0].transform.basis = Basis.IDENTITY  ## faces -Z
+	# Reset visual-root facing to -Z (default). S07-T06: rotation lives on
+	# VisualRoot, not on the CharacterBody3D itself.
+	players_a[0].get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
 	ball.global_position = Vector3(0.4, 0.0, 0.0)
 	ball.linear_velocity = Vector3(8.0, 0.0, 0.0)  ## ball moving +X
 	bc.step(0.0)  ## triggers _try_pickup → _assign_carrier
@@ -226,7 +228,7 @@ func test_receiver_starts_facing_warp_toward_incoming_ball() -> void:
 	# ~110 ms but the test stays loose to survive minor tuning changes.
 	for _i in 18:  ## 18 ticks @ 1/120 ≈ 150 ms
 		players_a[0].update_facing(1.0 / 120.0)
-	var forward: Vector3 = -players_a[0].transform.basis.z
+	var forward: Vector3 = players_a[0].get_visual_forward()
 	assert_almost_eq(forward.x, -1.0, 0.05,
 		"After warp window, receiver faces TOWARD the incoming ball")
 	assert_almost_eq(forward.z, 0.0, 0.1, "Facing must be planar")
@@ -235,13 +237,13 @@ func test_receiver_starts_facing_warp_toward_incoming_ball() -> void:
 func test_receiver_keeps_facing_when_ball_at_rest() -> void:
 	# Ball at rest → no orientation warp (first pickup, restarts).
 	players_a[0].global_position = Vector3.ZERO
-	players_a[0].transform.basis = Basis.IDENTITY  ## faces -Z
+	players_a[0].get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
 	ball.global_position = Vector3(0.4, 0.0, 0.0)
 	ball.linear_velocity = Vector3.ZERO
 	bc.step(0.0)
 	assert_eq(players_a[0]._facing_warp_remaining_s, 0.0,
 		"Ball at rest must NOT arm a warp window")
-	var forward: Vector3 = -players_a[0].transform.basis.z
+	var forward: Vector3 = players_a[0].get_visual_forward()
 	assert_almost_eq(forward.z, -1.0, 1.0e-3,
 		"Ball at rest leaves the receiver's facing untouched")
 

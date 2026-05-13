@@ -164,9 +164,10 @@ func _try_pickup() -> void:
 func _sync_carry_position() -> void:
 	if _carrier == null:
 		return
-	# Player-local carry offset → world. basis * vec rotates the offset
-	# with the player so the ball stays "in front of" them as they turn.
-	var world_offset: Vector3 = _carrier.transform.basis * CARRY_OFFSET_LOCAL
+	# Player-local carry offset → world. Use VisualRoot basis (S07-T06)
+	# so the ball follows the rendered mesh, not the (always-identity)
+	# collision capsule.
+	var world_offset: Vector3 = _carrier.get_visual_basis() * CARRY_OFFSET_LOCAL
 	var target: Vector3 = _carrier.global_position + world_offset
 	# CRITICAL: while the ball is KINEMATIC-frozen, `_integrate_forces` does
 	# NOT run, so `teleport_to` (which stages _pending_teleport for the

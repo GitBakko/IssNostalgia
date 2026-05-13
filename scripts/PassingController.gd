@@ -146,12 +146,9 @@ func try_pass() -> bool:
 func select_pass_target(active: Player) -> Player:
 	if team_controller == null:
 		return null
-	var facing: Vector3 = -active.transform.basis.z
-	facing.y = 0.0
-	if facing.length_squared() < 1.0e-4:
-		facing = Vector3.FORWARD
-	else:
-		facing = facing.normalized()
+	# Read VisualRoot facing (S07-T06) — the cone follows the rendered
+	# mesh, so the pass goes where the user SEES the player aiming.
+	var facing: Vector3 = active.get_visual_forward()
 	var best: Player = null
 	var best_dist_sq: float = INF
 	for p in team_controller.players:
@@ -177,12 +174,7 @@ func select_pass_target(active: Player) -> Player:
 func compute_pass_target_position(active: Player, target: Player) -> Vector3:
 	if target != null:
 		return target.global_position
-	var facing: Vector3 = -active.transform.basis.z
-	facing.y = 0.0
-	if facing.length_squared() < 1.0e-4:
-		facing = Vector3.FORWARD
-	else:
-		facing = facing.normalized()
+	var facing: Vector3 = active.get_visual_forward()
 	return active.global_position + facing * fallback_pass_distance_m
 
 
