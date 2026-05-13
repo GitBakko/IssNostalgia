@@ -324,6 +324,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	for i in _current_substeps:
 		_integrate_substep(state, sub_dt)
 	_push_replay_entry(state)
+	# Godot 4 quirk: even with `custom_integrator = true`, the physics
+	# server still applies one final `transform.origin += linear_velocity
+	# * dt` after `_integrate_forces` returns. Our substep loop has
+	# already advanced `transform.origin` to the fully integrated p_final,
+	# so without this compensation the ball travels exactly 2× the
+	# intended distance per tick (LMB lobs landed at 2× the click).
+	# Subtract the upcoming auto-step here, AFTER the replay buffer has
+	# recorded the true integrated position, so Godot's auto-advance
+	# lands us back on p_final.
+	var t: Transform3D = state.transform
+	t.origin -= state.linear_velocity * dt
+	state.transform = t
 
 
 # Commit deferred-state requests (teleport / launch) into the physics
