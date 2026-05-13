@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/TrajectoryVisualizer.tscn" id="5_traj"]
 [ext_resource type="PackedScene" path="res://scenes/PhysicsDebugUI.tscn" id="6_debug"]
 [ext_resource type="PackedScene" path="res://scenes/ForceGizmo.tscn" id="7_gizmo"]
+[ext_resource type="PackedScene" path="res://scenes/WetPatch.tscn" id="8_wet"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -37,32 +38,42 @@ ball_path = NodePath("../Ball")
 
 [node name="ForceGizmo" parent="." unique_id=1673386513 instance=ExtResource("7_gizmo")]
 
+[node name="WetPatch" parent="." unique_id=952275593 instance=ExtResource("8_wet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 8)
+
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1055643380]
 
 [node name="Instructions" type="Label" parent="HUD" unique_id=1672820386]
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 700.0
-offset_bottom = 440.0
+offset_bottom = 500.0
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4
-theme_override_font_sizes/font_size = 22
+theme_override_font_sizes/font_size = 16
 text = "IssNostalgia — Physics Sandbox  (Sprint 02)
 SPACE   vertical          (15 m/s, light spin)
 H       horizontal +X     (20 m/s, topspin)
 1       Tiro a giro       → mouse  (25 m/s @15°, sidespin 8, topspin 2)
 2       Foglia morta      → mouse  (22 m/s @20°, backspin 6, sidespin 3)
-3       Rasoterra forte   → mouse  (30 m/s @1°,  topspin 4)
+3       Rasoterra forte   → mouse  (40 m/s @1°,  topspin 4)
 4       Knuckleball       → mouse  (28 m/s @10°, ~zero spin)
+5       Rasoterra medio   → mouse  (15 m/s @3°,  topspin 4)
+6       Rasoterra debole  → mouse  (10 m/s @1°,  topspin 4)
 LMB     lob to clicked ground point
+RMB drag  orbit camera (yaw/pitch)
+wheel   zoom in / out
 R       reset to spawn (ground)
-W       toggle dry / wet surface
+W       toggle dry / wet surface (global)
+        + roll through the blue patch (wet zone)
 F5      toggle slow-motion (0.25x)
 F1      debug UI panel (sliders, presets, force readout)
 G       3D force gizmo
         viola=gravity  rosso=drag  verde=magnus
         giallo=knuckle  blu=grass  bianco=net (sum)
+P       toggle replay (pause/resume from cursor)
+. / ,   replay step +1 / -1 physics tick
 ESC     quit"
 
 [node name="Telemetry" type="Label" parent="HUD" unique_id=564516205]
@@ -72,7 +83,7 @@ anchor_right = 1.0
 offset_left = -360.0
 offset_top = 24.0
 offset_right = -24.0
-offset_bottom = 180.0
+offset_bottom = 220.0
 theme_override_colors/font_color = Color(1, 1, 1, 0.92)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 4

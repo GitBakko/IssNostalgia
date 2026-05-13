@@ -18,6 +18,11 @@ bin/
 # not C# build output, and Godot needs them at editor + export time.
 !addons/imgui-godot/bin/
 !addons/imgui-godot/bin/**
+# But IGNORE the `~`-prefixed hot-reload copies Godot creates next to
+# each GDExtension binary on Windows — they're per-run temporaries that
+# get re-generated on every editor launch and can lock under AV / locks.
+addons/imgui-godot/bin/~*
+addons/imgui-godot/bin/**/~*
 obj/
 *.user
 *.suo

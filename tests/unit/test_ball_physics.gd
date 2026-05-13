@@ -23,6 +23,10 @@ var cfg: PhysicsConfig
 
 func before_each() -> void:
 	cfg = (load("res://resources/PhysicsConfig.tres") as PhysicsConfig).duplicate(true)
+	# Sprint 1 closed-form formulas assume a constant `drag_coeff`. S05-A04
+	# introduced velocity-dependent Cd (drag crisis); disable it here so the
+	# terminal-velocity assertion still locks the simple model.
+	cfg.drag_crisis_enabled = false
 	ball = BallPhysics.new()
 	ball.config = cfg
 	add_child(ball)

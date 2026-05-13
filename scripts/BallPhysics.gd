@@ -65,6 +65,53 @@ signal bounced(impact_speed: float, normal: Vector3, position: Vector3)
 var _current_substeps: int = SUBSTEPS_LOW
 var _sim_time: float = 0.0
 
+# Sprint 5 T03b — stall+flip knuckleball state. Replaces the continuous
+# Simplex noise with discrete events:
+#   - every `stall_duration` seconds (sampled from
+#     [knuckle_stall_min, knuckle_stall_max]) a new Cy target + axis is
+#     drawn from `_kn_rng`
+#   - `_kn_cy_current` smoothly ramps toward the target at
+#     `knuckle_transient_rate` (~0.12 s to converge)
+#   - lateral vs vertical axis sampled with `knuckle_lateral_bias`;
+#     vertical axis biased 3:1 downward to reproduce the "late dip"
+#     of real-world knuckle free kicks (Carré 2004)
+var _kn_cy_current: float = 0.0
+var _kn_cy_target: float = 0.0
+var _kn_stall_timer: float = 0.0
+var _kn_stall_duration: float = 0.0
+var _kn_axis: Vector3 = Vector3.RIGHT
+var _kn_rng: RandomNumberGenerator
+
+# Per-shot opt-in flag (S05-A05). The stall-flip knuckle force is a
+# "special skill" that only fires when a launcher explicitly arms it
+# — every other shot type (lob, curve, dead leaf, grounder, vertical,
+# horizontal, ground click) leaves it false so e.g. a low LMB lob
+# doesn't accidentally drift sideways. Reset to false on every
+# `reset_knuckle_clock` (called by every launcher).
+var _knuckle_active_for_shot: bool = false
+
+# Per-zone wet state (S05-A08). `_wet_zone_count` is a refcount of
+# overlapping wet SurfaceZones — the ball stays wet until every zone
+# has been exited, so adjacent patches don't flicker when the ball
+# rolls along their boundary. Surface getters read `_is_wet()` which
+# OR-combines the zone state with the global `config.surface_wet`
+# flag (backwards compat with the Sprint 3 W-key toggle).
+var _wet_zone_count: int = 0
+
+# Replay (Sprint 5 T06) — ring buffer of recent physics ticks so the
+# user can pause + frame-step through a bounce sequence to diagnose
+# perceptual artefacts (e.g. the LMB lob "schizzo"). One entry per
+# physics tick (120 Hz × 5 s = 600 entries). Each entry caches the
+# full RigidBody3D state needed to restore the simulation:
+#   {t: float, position: Vector3, velocity: Vector3,
+#    angular_velocity: Vector3, basis: Basis}
+const REPLAY_BUFFER_SIZE: int = 600
+var _replay_buffer: Array = []
+var _replay_head: int = 0      ## next write index, modular
+var _replay_count: int = 0     ## number of valid entries
+var _replay_active: bool = false
+var _replay_cursor: int = 0    ## logical index 0..count-1, count-1 = newest
+
 # Telemetry — last computed force vectors (Newton). Read by the debug UI
 # and the force gizmo. Updated every physics substep.
 var last_force_gravity: Vector3 = Vector3.ZERO
@@ -123,6 +170,9 @@ func _ready() -> void:
 
 
 func _init_knuckle_noise() -> void:
+	# Legacy SIMPLEX streams (kept for backwards compat with anything
+	# that still references them — the new stall+flip model below
+	# doesn't use them).
 	_knuckle_noise_a = FastNoiseLite.new()
 	_knuckle_noise_a.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_knuckle_noise_a.seed = config.knuckle_seed
@@ -131,6 +181,11 @@ func _init_knuckle_noise() -> void:
 	_knuckle_noise_b.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_knuckle_noise_b.seed = config.knuckle_seed + 1
 	_knuckle_noise_b.frequency = config.knuckle_noise_frequency
+	# Seeded RNG drives the stall+flip model — fully deterministic for
+	# a given knuckle_seed, so the GUT drift test and the in-game shot
+	# stay reproducible across runs.
+	_kn_rng = RandomNumberGenerator.new()
+	_kn_rng.seed = config.knuckle_seed
 
 
 func _init_grass_noise() -> void:
@@ -221,11 +276,31 @@ func _play_squash(impact_speed: float, normal: Vector3) -> void:
 	_squash_tween.tween_property(_mesh_node, "scale", _base_mesh_scale, 0.30)
 
 
-## Resets the knuckle noise streams to a known starting time. Useful for
-## the launcher (every shot replays from t=0 of its own noise channel)
-## and for unit tests.
+## Resets the knuckle noise streams + stall-flip state to a known
+## starting point. Called by the launcher on every shot (so the
+## trajectory replays from t=0 of its own RNG stream) and by GUT
+## tests to lock determinism.
 func reset_knuckle_clock() -> void:
 	_sim_time = 0.0
+	_kn_cy_current = 0.0
+	_kn_cy_target = 0.0
+	_kn_stall_timer = 0.0
+	_kn_stall_duration = 0.0
+	_kn_axis = Vector3.RIGHT
+	_knuckle_active_for_shot = false
+	if _kn_rng != null:
+		_kn_rng.seed = config.knuckle_seed
+
+
+## Arm or disarm the knuckle force for the current shot. Called by
+## `BallLauncher.launch_knuckle` after staging the velocity. Every
+## other launch path resets it to false via `reset_knuckle_clock`.
+func set_knuckle_active(active: bool) -> void:
+	_knuckle_active_for_shot = active
+
+
+func is_knuckle_active() -> bool:
+	return _knuckle_active_for_shot
 
 
 func _apply_debug_visual_scale() -> void:
@@ -238,6 +313,9 @@ func _apply_debug_visual_scale() -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	if _replay_active:
+		_apply_replay_entry(state)
+		return
 	_apply_pending_state(state)
 	var dt: float = state.step
 	var speed: float = state.linear_velocity.length()
@@ -245,6 +323,19 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var sub_dt: float = dt / float(_current_substeps)
 	for i in _current_substeps:
 		_integrate_substep(state, sub_dt)
+	_push_replay_entry(state)
+	# Godot 4 quirk: even with `custom_integrator = true`, the physics
+	# server still applies one final `transform.origin += linear_velocity
+	# * dt` after `_integrate_forces` returns. Our substep loop has
+	# already advanced `transform.origin` to the fully integrated p_final,
+	# so without this compensation the ball travels exactly 2× the
+	# intended distance per tick (LMB lobs landed at 2× the click).
+	# Subtract the upcoming auto-step here, AFTER the replay buffer has
+	# recorded the true integrated position, so Godot's auto-advance
+	# lands us back on p_final.
+	var t: Transform3D = state.transform
+	t.origin -= state.linear_velocity * dt
+	state.transform = t
 
 
 # Commit deferred-state requests (teleport / launch) into the physics
@@ -283,6 +374,94 @@ func apply_launch_state(linear: Variant, angular: Variant = null) -> void:
 		_pending_angular = angular
 
 
+# ---- Replay / frame-step (Sprint 5 T06) ----------------------------------
+
+## Snapshot the live state of the body into the ring buffer. Called at
+## the end of `_integrate_forces` when NOT in replay mode.
+func _push_replay_entry(state: PhysicsDirectBodyState3D) -> void:
+	var entry: Dictionary = {
+		"t": _sim_time,
+		"position": state.transform.origin,
+		"velocity": state.linear_velocity,
+		"angular_velocity": state.angular_velocity,
+		"basis": state.transform.basis,
+	}
+	if _replay_buffer.size() < REPLAY_BUFFER_SIZE:
+		_replay_buffer.append(entry)
+	else:
+		_replay_buffer[_replay_head] = entry
+	_replay_head = (_replay_head + 1) % REPLAY_BUFFER_SIZE
+	_replay_count = mini(_replay_count + 1, REPLAY_BUFFER_SIZE)
+
+
+## Translate a logical cursor (0 = oldest, count-1 = newest) into the
+## physical ring index. Returns null when the buffer is empty.
+func _replay_entry_at(logical_idx: int) -> Variant:
+	if _replay_count == 0:
+		return null
+	var idx: int = clampi(logical_idx, 0, _replay_count - 1)
+	var oldest: int = (_replay_head - _replay_count + REPLAY_BUFFER_SIZE) % REPLAY_BUFFER_SIZE
+	var physical: int = (oldest + idx) % REPLAY_BUFFER_SIZE
+	return _replay_buffer[physical]
+
+
+## Apply the entry the cursor points at to the current physics state.
+## Called instead of the substep loop while replay is active.
+func _apply_replay_entry(state: PhysicsDirectBodyState3D) -> void:
+	var entry: Variant = _replay_entry_at(_replay_cursor)
+	if entry == null:
+		return
+	var t: Transform3D = state.transform
+	t.origin = entry.position
+	t.basis = entry.basis
+	state.transform = t
+	state.linear_velocity = entry.velocity
+	state.angular_velocity = entry.angular_velocity
+
+
+## Enter replay mode. Cursor parks on the newest captured entry; the
+## integrator stops simulating new forces until `exit_replay()` is
+## called. Safe to call multiple times.
+func enter_replay() -> void:
+	if _replay_count == 0:
+		push_warning("Replay buffer empty — launch the ball first")
+		return
+	_replay_active = true
+	_replay_cursor = _replay_count - 1
+
+
+## Exit replay mode. The cursor's state stays applied as the new live
+## state — i.e. the ball "resumes" from wherever the user paused, not
+## from the snapshot taken when replay started. The buffer is left
+## intact; new ticks continue overwriting older entries.
+func exit_replay() -> void:
+	_replay_active = false
+
+
+## Step the replay cursor by `delta` ticks. Negative goes back in
+## time, positive goes forward. Clamped to the buffer extent.
+func step_replay(delta: int) -> void:
+	if not _replay_active:
+		return
+	_replay_cursor = clampi(_replay_cursor + delta, 0, _replay_count - 1)
+
+
+func is_replay_active() -> bool:
+	return _replay_active
+
+
+## How much wall-time the cursor sits behind the newest entry, in
+## seconds. Used by the HUD `[REPLAY t=-X.XX s]` indicator.
+func replay_cursor_offset_seconds() -> float:
+	if not _replay_active or _replay_count == 0:
+		return 0.0
+	var newest: Variant = _replay_entry_at(_replay_count - 1)
+	var current: Variant = _replay_entry_at(_replay_cursor)
+	if newest == null or current == null:
+		return 0.0
+	return current.t - newest.t
+
+
 func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	_sim_time += sub_dt
 	var v: Vector3 = state.linear_velocity
@@ -295,7 +474,7 @@ func _integrate_substep(state: PhysicsDirectBodyState3D, sub_dt: float) -> void:
 	# Knuckleball perturbation. Time-dependent (Simplex noise), so it
 	# lives outside `compute_force` and gets applied as a velocity delta.
 	if config.knuckle_enabled:
-		var a_kn: Vector3 = knuckle_acceleration(state.linear_velocity, omega, _sim_time)
+		var a_kn: Vector3 = knuckle_acceleration(state.linear_velocity, omega, _sim_time, sub_dt)
 		last_force_knuckle = a_kn * config.ball_mass
 		v += a_kn * sub_dt
 	else:
@@ -494,8 +673,19 @@ func _bounce_cross_2002(v: Vector3, omega: Vector3, normal: Vector3) -> Dictiona
 	# the direction opposing v_c. Hence:
 	#   J_t_grip = (1 + e_t) · |v_c| · m · k / (1 + k)
 	var J_t_grip: float = (1.0 + config.bounce_e_t) * v_c_mag * m * inertia_factor / (1.0 + inertia_factor)
-	var J_t_max: float = _mu_s() * J_n_mag
-	var J_t_mag: float = minf(J_t_grip, J_t_max)
+	var J_t_coulomb_max: float = _mu_s() * J_n_mag
+	# Cross-2014 surface-compliance tangential impulse (S05-A02). Same
+	# (1 + e_t_surface) · v_c form as the grip impulse, but using a
+	# separate e_t that represents the grass + envelope absorbing
+	# tangential energy independently of how much normal energy bounced
+	# back. On grazing impacts e_n collapses → J_n_mag tiny → Coulomb
+	# friction tiny — without this term horizontal speed survives
+	# almost untouched and the ball "skips" forward unrealistically.
+	var J_t_surface: float = (1.0 + config.bounce_e_t_surface) * v_c_mag * m * inertia_factor / (1.0 + inertia_factor)
+	# Take the LARGER of Coulomb and surface — they're alternative
+	# explanations of the same dissipation, not stackable — and cap at
+	# the full grip target (can't dissipate more than grip would).
+	var J_t_mag: float = clampf(maxf(J_t_coulomb_max, J_t_surface), 0.0, J_t_grip)
 	var J_t: Vector3 = (-v_c_t / v_c_mag) * J_t_mag
 
 	# Apply impulse.
@@ -503,6 +693,26 @@ func _bounce_cross_2002(v: Vector3, omega: Vector3, normal: Vector3) -> Dictiona
 	var v_tangent_new: Vector3 = v_tangent + dv_linear
 	var d_omega: Vector3 = r_contact.cross(J_t) / I
 	var omega_new: Vector3 = omega + d_omega
+
+	# Arcade retention clamp (S05-A02). The Cross-2014 term above is
+	# usually enough, but on edge cases (very high spin coupled with
+	# low |v_c|, or a Coulomb-only branch picked when surface compliance
+	# is configured low) the post-bounce |v_t| can still exceed the
+	# 60–85 % envelope measured for a soccer ball on grass (Carré 2004,
+	# Sports Engineering 7:113). Hard-clamp the tangential magnitude as
+	# a function of incidence angle:
+	#   grazing (sin_impact ≈ 0)  → floor (default 0.60)
+	#   near-normal (sin_impact ≥ 0.35) → ceil  (default 0.85)
+	var v_t_in_mag: float = v_tangent.length()
+	var v_t_out_mag: float = v_tangent_new.length()
+	if v_t_in_mag > 1e-6 and v_t_out_mag > 1e-6:
+		var max_retention: float = lerpf(
+			config.bounce_t_retention_floor,
+			config.bounce_t_retention_ceil,
+			angle_factor)
+		var max_v_t_out: float = v_t_in_mag * max_retention
+		if v_t_out_mag > max_v_t_out:
+			v_tangent_new = v_tangent_new * (max_v_t_out / v_t_out_mag)
 
 	return {
 		"velocity": v_normal_new + v_tangent_new,
@@ -518,21 +728,38 @@ func _restitution_at_velocity(v_n_mag: float) -> float:
 	return e_base * exp(-v_n_mag / config.restitution_v_ref)
 
 
+## True when the ball is over a wet SurfaceZone OR the global wet flag
+## is set. Surface getters branch on this — the zone always wins, the
+## global flag is a fallback for scenes without zones.
+func _is_wet() -> bool:
+	return _wet_zone_count > 0 or config.surface_wet
+
+
+## Called by `SurfaceZone` on body_entered. Public + idempotent on the
+## stack semantics: N entries → N exits to clear.
+func enter_wet_zone() -> void:
+	_wet_zone_count += 1
+
+
+func exit_wet_zone() -> void:
+	_wet_zone_count = maxi(_wet_zone_count - 1, 0)
+
+
 ## Surface-sensitive parameter getters.
 func _restitution_base() -> float:
-	return config.restitution_base_wet if config.surface_wet else config.restitution_base
+	return config.restitution_base_wet if _is_wet() else config.restitution_base
 
 
 func _mu_s() -> float:
-	return config.bounce_mu_s_wet if config.surface_wet else config.bounce_mu_s
+	return config.bounce_mu_s_wet if _is_wet() else config.bounce_mu_s
 
 
 func _rolling_friction() -> float:
-	return config.rolling_friction_wet if config.surface_wet else config.rolling_friction_coeff
+	return config.rolling_friction_wet if _is_wet() else config.rolling_friction_coeff
 
 
 func _grass_kick_amount() -> float:
-	return config.grass_roughness_kick_wet if config.surface_wet else config.grass_roughness_kick
+	return config.grass_roughness_kick_wet if _is_wet() else config.grass_roughness_kick
 
 
 ## Continuous rolling resistance. Applies an opposing-to-motion deceleration
@@ -596,54 +823,97 @@ func compute_force(velocity: Vector3, omega: Vector3 = Vector3.ZERO) -> Vector3:
 
 
 ## Knuckleball acceleration (m/s²), perpendicular to the velocity.
-## Active only when `|ω| < knuckle_threshold_spin` AND `|v| > knuckle_threshold_speed`.
+## Sprint 5 T03b stall+flip model (S05-A04). Replaces the continuous
+## SIMPLEX noise with discrete events that match the real-world
+## side-force statistics measured by Hong & Asai (2010) and the
+## smart-ball flight studies (PMC9182928, PMC3660809):
 ##
-## Two-layer noise model so the trajectory feels unpredictable, matching
-## the textbook definition ("high-speed strike with little to no spin,
-## causing the ball to move unpredictably — wobble or dip — through the
-## air"):
-##   - **Smooth wobble**: two independent SIMPLEX streams (seeded with
-##     `knuckle_seed` and `knuckle_seed + 1`) at `knuckle_noise_frequency`.
-##   - **Snap layer**: the same streams sampled at a much higher rate
-##     (`knuckle_spike_frequency_mul ×` base freq) — wherever the
-##     high-rate noise exceeds `knuckle_spike_threshold` we add an
-##     additional impulse scaled by `knuckle_spike_amplitude_mul`. This
-##     produces the brief, hard-to-anticipate veers that knuckle
-##     specialists exploit in real life, without crossing into chaotic
-##     behaviour.
-## Result is deterministic for a given seed.
-func knuckle_acceleration(velocity: Vector3, omega: Vector3, time: float) -> Vector3:
-	if _knuckle_noise_a == null:
+##   - 1–2 lateral direction flips per ~1.5 s of flight at ~25 m/s
+##   - each phase lasts 0.35–0.70 s (the "stall")
+##   - the force ramps to the new target in ~0.12 s (transient)
+##   - |Cy| amplitude 0.05–0.15 physical (we ship arcade 0.15–0.25
+##     and an extra `knuckle_arcade_multiplier` knob for exaggeration)
+##   - axis: 70 % horizontal lateral, 30 % vertical (and 75 % of the
+##     vertical flips are downward → the famous Ronaldo / Pirlo "late
+##     dip")
+##
+## Force = Cy_effective · 0.5 · ρ · v² · A applied along the active
+## axis; division by mass gives the acceleration we return. Fully
+## deterministic for a given `knuckle_seed`.
+##
+## sub_dt is required (live integrator and predictor both pass it) so
+## the stall timer + ramp advance correctly regardless of substep
+## count — the previous time-driven model didn't need it.
+func knuckle_acceleration(velocity: Vector3, omega: Vector3,
+		_time: float, sub_dt: float = 1.0 / 120.0) -> Vector3:
+	if _kn_rng == null:
+		return Vector3.ZERO
+	# Special-skill gate (S05-A05): the knuckle only fires when a
+	# launcher has explicitly armed it for this shot.
+	if not _knuckle_active_for_shot:
 		return Vector3.ZERO
 	var v_mag: float = velocity.length()
 	if v_mag < config.knuckle_threshold_speed:
 		return Vector3.ZERO
 	if omega.length() > config.knuckle_threshold_spin:
 		return Vector3.ZERO
+
 	var v_hat: Vector3 = velocity / v_mag
-	var lateral: Vector3 = v_hat.cross(Vector3.UP)
-	if lateral.length_squared() < 1e-6:
-		lateral = v_hat.cross(Vector3.RIGHT)
-	lateral = lateral.normalized()
-	var transverse: Vector3 = lateral.cross(v_hat).normalized()
-	# Smooth wobble (base layer)
-	var smooth_a: float = _knuckle_noise_a.get_noise_1d(time)
-	var smooth_b: float = _knuckle_noise_b.get_noise_1d(time)
-	# Snap layer — same streams sampled at a higher rate plus an offset
-	# so the two octaves don't lock-phase.
-	var t_fast: float = time * config.knuckle_spike_frequency_mul
-	var spike_a: float = _knuckle_noise_a.get_noise_1d(t_fast + 137.0)
-	var spike_b: float = _knuckle_noise_b.get_noise_1d(t_fast + 263.0)
-	var thr: float = config.knuckle_spike_threshold
-	var spike_mul: float = config.knuckle_spike_amplitude_mul
-	if absf(spike_a) > thr:
-		smooth_a += signf(spike_a) * (absf(spike_a) - thr) * spike_mul
-	if absf(spike_b) > thr:
-		smooth_b += signf(spike_b) * (absf(spike_b) - thr) * spike_mul
-	# Velocity-scale: real knuckle effect grows with |v|^2 (drag-driven).
-	# Use a soft factor so slow knuckle shots still get something.
-	var speed_factor: float = clampf((v_mag - config.knuckle_threshold_speed) / 12.0, 0.2, 1.4)
-	return config.knuckle_amplitude * speed_factor * (lateral * smooth_a + transverse * smooth_b)
+
+	# Stall timer — when it expires draw a new Cy target + axis.
+	_kn_stall_timer += sub_dt
+	if _kn_stall_timer >= _kn_stall_duration:
+		_kn_stall_timer = 0.0
+		_kn_stall_duration = _kn_rng.randf_range(
+			config.knuckle_stall_min, config.knuckle_stall_max)
+		var cy_mag: float = _kn_rng.randf_range(
+			config.knuckle_cy_min, config.knuckle_cy_max)
+		var cy_sign: float = 1.0 if _kn_rng.randf() > 0.5 else -1.0
+		_kn_cy_target = cy_mag * cy_sign
+		# Axis selection: lateral vs vertical. Vertical axis biased
+		# 3:1 downward so the dip dominates the dive direction.
+		var lateral: Vector3 = v_hat.cross(Vector3.UP)
+		if lateral.length_squared() < 1e-6:
+			lateral = v_hat.cross(Vector3.RIGHT)
+		lateral = lateral.normalized()
+		if _kn_rng.randf() < config.knuckle_lateral_bias:
+			_kn_axis = lateral
+		else:
+			# vertical perp = lateral × v_hat (pointing roughly up for +X motion)
+			var vertical: Vector3 = lateral.cross(v_hat).normalized()
+			var down_bias: float = 0.75
+			_kn_axis = -vertical if _kn_rng.randf() < down_bias else vertical
+
+	# Smooth ramp toward the target (~0.12 s convergence at default rate).
+	_kn_cy_current = move_toward(_kn_cy_current, _kn_cy_target,
+		config.knuckle_transient_rate * sub_dt)
+
+	var cy_effective: float = _kn_cy_current * config.knuckle_arcade_multiplier
+	var area: float = PI * config.ball_radius * config.ball_radius
+	var force_mag: float = cy_effective * 0.5 * config.air_density * v_mag * v_mag * area
+	return _kn_axis * (force_mag / config.ball_mass)
+
+
+## Cd as a function of speed — implements the drag-crisis dip that
+## a real FIFA ball goes through across Re ≈ 2.2–3.3 × 10⁵
+## (PMC3657093). For speeds outside `[drag_crisis_v_low,
+## drag_crisis_v_high]` returns the base `drag_coeff`; inside the
+## band lerps via smoothstep to `drag_crisis_cd_low`. Visual signature:
+## the ball "doesn't slow down" while it crosses the critical zone
+## and then loses speed quickly when it exits — matching the late
+## dip / sudden brake users recognise from real footage.
+func _effective_drag_coeff(speed: float) -> float:
+	if not config.drag_crisis_enabled:
+		return config.drag_coeff
+	var lo: float = config.drag_crisis_v_low
+	var hi: float = config.drag_crisis_v_high
+	if speed <= lo:
+		return config.drag_coeff
+	if speed >= hi:
+		return config.drag_crisis_cd_low
+	var t: float = (speed - lo) / (hi - lo)
+	var s: float = smoothstep(0.0, 1.0, t)
+	return lerpf(config.drag_coeff, config.drag_crisis_cd_low, s)
 
 
 ## Grass jitter on a hard ground bounce. Adds a positive vertical kick
@@ -731,7 +1001,8 @@ func _drag_force(velocity: Vector3) -> Vector3:
 	if speed < MIN_SPEED_FOR_DRAG:
 		return Vector3.ZERO
 	var area: float = PI * config.ball_radius * config.ball_radius
-	var magnitude: float = 0.5 * config.air_density * config.drag_coeff * area * speed * speed
+	var cd: float = _effective_drag_coeff(speed)
+	var magnitude: float = 0.5 * config.air_density * cd * area * speed * speed
 	return -velocity.normalized() * magnitude
 
 
@@ -766,7 +1037,7 @@ func predict_forward(p0: Vector3, v0: Vector3, omega0: Vector3,
 		p = step.position
 		v = step.velocity
 		if config.knuckle_enabled:
-			v += knuckle_acceleration(v0, omega0, t) * sub_dt
+			v += knuckle_acceleration(v0, omega0, t, sub_dt) * sub_dt
 		var col: Dictionary = resolve_static_collisions(p, v, omega)
 		if col.collided:
 			p = col.position

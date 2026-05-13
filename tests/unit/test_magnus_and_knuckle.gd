@@ -51,26 +51,48 @@ func test_magnus_curve_direction() -> void:
 # --- Knuckleball ----------------------------------------------------------
 
 func test_knuckle_zero_below_threshold() -> void:
+	ball.set_knuckle_active(true)   # arm so the gates we test below are the only blockers
 	var slow: Vector3 = Vector3(2.0, 0.0, 0.0)
-	var a: Vector3 = ball.knuckle_acceleration(slow, Vector3.ZERO, 1.0)
+	var a: Vector3 = ball.knuckle_acceleration(slow, Vector3.ZERO, 1.0, 1.0 / 120.0)
 	assert_eq(a, Vector3.ZERO, "No knuckle below threshold_speed")
 	var fast: Vector3 = Vector3(28.0, 0.0, 0.0)
-	var a2: Vector3 = ball.knuckle_acceleration(fast, Vector3(0.0, 5.0, 0.0), 1.0)
+	var a2: Vector3 = ball.knuckle_acceleration(fast, Vector3(0.0, 5.0, 0.0), 1.0, 1.0 / 120.0)
 	assert_eq(a2, Vector3.ZERO, "No knuckle when |omega| > threshold_spin")
 
 
-func test_knuckle_acceleration_deterministic() -> void:
-	# Same ball instance, same (velocity, omega, time) inputs must produce
-	# the same noise output bytewise — Simplex is a pure function of seed
-	# and sample coordinate.
+func test_knuckle_off_by_default_special_skill() -> void:
+	# S05-A05: the knuckle is a per-shot opt-in. Without
+	# `set_knuckle_active(true)` it must produce zero force even on a
+	# launch shape that would otherwise pass the speed / spin gates
+	# (LMB lob, vertical launch, etc. were getting accidental drift
+	# before this gate landed).
 	var v: Vector3 = Vector3(28.0, 0.0, 0.0)
 	var omega: Vector3 = Vector3.ZERO
-	var t: float = 0.37
-	var a1: Vector3 = ball.knuckle_acceleration(v, omega, t)
-	var a2: Vector3 = ball.knuckle_acceleration(v, omega, t)
-	assert_eq(a1, a2, "Same input must yield identical acceleration")
-	# A non-zero output proves the noise stream is actually running.
-	assert_gt(a1.length(), 0.0, "Noise must be non-zero at t=0.37")
+	var a: Vector3 = ball.knuckle_acceleration(v, omega, 1.0, 1.0 / 120.0)
+	assert_eq(a, Vector3.ZERO, "Knuckle must stay silent until a launcher arms it")
+
+
+func test_knuckle_acceleration_deterministic() -> void:
+	# S05-A04 stall-flip model: determinism is now at the SEQUENCE level
+	# (same seed + same call sequence → identical trajectory), not at the
+	# single-call level — every call advances the stall timer + ramp, so
+	# back-to-back calls intentionally diverge. Reset between sequences
+	# and check the final state matches.
+	var v: Vector3 = Vector3(28.0, 0.0, 0.0)
+	var omega: Vector3 = Vector3.ZERO
+	var sub_dt: float = 1.0 / 120.0
+	var a1: Vector3 = Vector3.ZERO
+	var a2: Vector3 = Vector3.ZERO
+	ball.reset_knuckle_clock()
+	ball.set_knuckle_active(true)
+	for i in 60:
+		a1 = ball.knuckle_acceleration(v, omega, float(i) * sub_dt, sub_dt)
+	ball.reset_knuckle_clock()
+	ball.set_knuckle_active(true)
+	for i in 60:
+		a2 = ball.knuckle_acceleration(v, omega, float(i) * sub_dt, sub_dt)
+	assert_eq(a1, a2, "Same seed + same call sequence must yield identical acceleration")
+	assert_gt(a1.length(), 0.0, "Knuckle must be non-zero after 60 substeps in flight")
 
 
 # --- Predictor ------------------------------------------------------------

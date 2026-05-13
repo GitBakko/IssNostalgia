@@ -115,18 +115,52 @@ func launch_dead_leaf(direction: Vector3 = Vector3.RIGHT) -> void:
 	launch_at_angle(direction, 22.0, 20.0, spin)
 
 
-## Rasoterra forte toward `direction`. 30 m/s @ 1° low arc, topspin 4 rad/s.
+## Rasoterra forte toward `direction`. 40 m/s @ 1° low arc, topspin 4 rad/s.
 ## The 1° elevation keeps the launch flat; topspin gives a downward
-## Magnus force that helps the ball glue to the surface.
+## Magnus force that helps the ball glue to the surface. Speed bumped
+## from 30 m/s after the custom-integrator 2× bug was fixed (S05-FIX):
+## the previous 30 m/s value had been visually calibrated when the
+## ball was secretly travelling twice the integrated distance, so the
+## real ground-truth speed required for a half-field grounder is the
+## higher of the two.
 func launch_grounder_topspin(direction: Vector3 = Vector3.RIGHT) -> void:
 	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
-	launch_at_angle(direction, 30.0, 1.0, spin)
+	launch_at_angle(direction, 40.0, 1.0, spin)
 
 
-## Knuckleball toward `direction`. 28 m/s @ 10°, near-zero spin so the
-## Simplex noise stream dominates the trajectory.
+## Rasoterra medio toward `direction`. 15 m/s @ 3°, topspin 4 rad/s.
+## Skips slightly higher than the strong variant but stays under the
+## 6 cm ceiling locked in `test_rasoterra_levels.gd`.
+func launch_grounder_medium(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
+	launch_at_angle(direction, 15.0, 3.0, spin)
+
+
+## Rasoterra debole toward `direction`. 10 m/s @ 1°, topspin 4 rad/s.
+## Slow enough to actually roll through wet patches and feel the
+## friction drop — this is the variant to use to validate per-zone
+## surfaces visually.
+func launch_grounder_weak(direction: Vector3 = Vector3.RIGHT) -> void:
+	var spin: Vector3 = compose_spin(direction, 4.0, 0.0, 0.0)
+	launch_at_angle(direction, 10.0, 1.0, spin)
+
+
+## Knuckleball toward `direction`. **30 m/s @ 6°**, near-zero spin.
+##
+## Trajectory intent (S05-A06): flat low parabola — the ball rises
+## briefly, "floats" through the drag-crisis zone (14-24 m/s, where
+## Cd ≈ 0.18 makes it look like it's hanging in the air), then drops
+## sharply when it exits the crisis and the vertical-down knuckle
+## flip kicks in. Apex sits at ~50 cm, total flight ~1.4 s. NOT a
+## lob — knuckle free kicks like Ronaldo / Pirlo launch low and
+## look "floaty" mid-air, then dive.
+##
+## Special skill — only this launch path arms the knuckle force;
+## every other launcher clears it via `reset_knuckle_clock`.
 func launch_knuckle(direction: Vector3 = Vector3.RIGHT) -> void:
-	launch_at_angle(direction, 28.0, 10.0, Vector3.ZERO)
+	launch_at_angle(direction, 30.0, 6.0, Vector3.ZERO)
+	if _ball != null:
+		_ball.set_knuckle_active(true)
 
 
 func launch_vertical(speed: float = -1.0, spin_z: float = INF) -> void:
@@ -148,15 +182,21 @@ func launch_horizontal(speed: float = -1.0, direction: Vector3 = Vector3.RIGHT,
 
 ## Aim the ball at `target_xz` (point on the ground plane). The arc
 ## height scales with launch distance (clamped to `[0.5 m, 6 m]`); the
-## horizontal speed is then derived from the closed-form ballistic
-## solution so the ball actually lands at the target. Drag and Magnus
-## are ignored here — close enough for sandbox lobs at moderate speeds.
+## horizontal speed is then iteratively refined against the live
+## integrator so the ball actually lands on the click.
 ##
 ## Spin is set to ZERO. A naïve "topspin lob" (S02-A12 fallback) caused
 ## Magnus to pull the ball backwards during descent: with ω̂ = (0,0,-1)
 ## and v̂ pointing down-and-forward, ω̂ × v̂ produces a negative-X
 ## component, decelerating and even reversing forward motion. A
 ## spinless lob lands cleanly on the click.
+##
+## Why iterative (S05-fix): at long range the vacuum solution overshoots
+## by 10-30%. Horizontal speed enters the drag-crisis band (Cd≈0.18 for
+## 14-24 m/s), so actual deceleration is far weaker than a single fixed
+## undershoot factor can compensate. We bracket v_horizontal by running
+## `predict_forward` (the same integrator the live ball uses), measuring
+## the simulated landing distance, and rescaling. Converges in 3-4 iters.
 func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 		arc_height_override: float = -1.0) -> void:
 	if _ball == null:
@@ -168,12 +208,58 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 	if dist < 0.001:
 		return
 	var dir: Vector3 = horizontal / dist
-	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.25, 0.5, 6.0)
+	# Arc height: scaled to make medium / long lobs look like real
+	# football crosses — apex ~6-10 m, not a flat laser pass. A "low
+	# pinpoint" pass is a separate skill (deferred to Phase 2 controls).
+	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.32, 1.2, 9.6)
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var t_flight: float = 2.0 * v_vertical / 9.81
-	# 0.92 empirical undershoot factor: drag at sandbox lob speeds (4-25 m/s)
-	# is hard to invert in closed form. Slight conservative bias means the
-	# ball never overshoots the click; if it lands a tiny bit short, the
-	# user can still see where the click was relative to the impact mark.
-	var v_horizontal: float = dist / t_flight * 0.92
+	var v_horizontal: float = dist / t_flight   # vacuum guess
+	for _i in 4:
+		var v0: Vector3 = dir * v_horizontal + Vector3.UP * v_vertical
+		var landing: float = _simulated_landing_distance(origin, v0)
+		if landing <= 0.5:
+			break
+		var ratio: float = dist / landing
+		if absf(ratio - 1.0) < 0.01:
+			break
+		v_horizontal *= ratio
 	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)
+
+
+## Drag-aware landing distance for the iterative lob solver. Uses
+## `BallPhysics.predict_forward` so gravity, quadratic drag, Magnus and
+## the drag-crisis Cd(v) curve all match the live integrator exactly.
+## Returns the horizontal (XZ) distance from `p0` to the first descent
+## crossing of ground level; falls back to the last simulated point if
+## the trajectory hasn't landed within ~5 s.
+##
+## Knuckle state is forced OFF for the duration of the prediction:
+## `_knuckle_active_for_shot` is sticky from the previous shot, so a
+## prior KEY_4 launch would otherwise inject a stall-flip lateral force
+## into the simulation, shorten the simulated landing, and trick the
+## iterative solver into massively overshooting the click on the
+## subsequent (spinless) live launch. The flag is restored before
+## returning so the next live shot's intent is preserved.
+func _simulated_landing_distance(p0: Vector3, v0: Vector3) -> float:
+	if _ball == null:
+		return 0.0
+	const SUB_DT: float = 1.0 / 240.0
+	const STEPS: int = 1200
+	var prev_knuckle: bool = _ball.is_knuckle_active()
+	_ball.set_knuckle_active(false)
+	var positions: PackedVector3Array = _ball.predict_forward(
+		p0, v0, Vector3.ZERO, 0.0, STEPS, SUB_DT)
+	_ball.set_knuckle_active(prev_knuckle)
+	var ground_y: float = p0.y
+	var ascended: bool = false
+	for i in STEPS:
+		var p: Vector3 = positions[i]
+		if not ascended:
+			if p.y > ground_y + 0.3:
+				ascended = true
+			continue
+		if p.y <= ground_y + 0.05:
+			return Vector2(p.x - p0.x, p.z - p0.z).length()
+	var p_end: Vector3 = positions[STEPS - 1]
+	return Vector2(p_end.x - p0.x, p_end.z - p0.z).length()

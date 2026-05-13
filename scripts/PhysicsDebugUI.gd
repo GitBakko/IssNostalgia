@@ -22,13 +22,20 @@ const PARAMS: Array = [
 	["ball_mass",                     "mass (kg)",                0.2,    0.7,    0.005,  "Ball",        "f"],
 	["ball_radius",                   "radius (m)",               0.05,   0.20,   0.001,  "Ball",        "f"],
 	# Drag
-	["drag_coeff",                    "Cd",                       0.0,    1.0,    0.005,  "Drag",        "f"],
+	["drag_coeff",                    "Cd subcritical",           0.0,    1.0,    0.005,  "Drag",        "f"],
+	["drag_crisis_enabled",           "drag crisis enabled",      0,      1,      1,      "Drag",        "b"],
+	["drag_crisis_v_low",             "crisis v_low (m/s)",       5.0,    30.0,   0.1,    "Drag",        "f"],
+	["drag_crisis_v_high",            "crisis v_high (m/s)",      10.0,   40.0,   0.1,    "Drag",        "f"],
+	["drag_crisis_cd_low",            "crisis Cd_low",            0.0,    0.5,    0.005,  "Drag",        "f"],
 	# Ground
 	["restitution_base",              "e_base (dry)",             0.0,    1.0,    0.005,  "Ground",      "f"],
 	["restitution_v_ref",             "v_ref (m/s)",              1.0,    60.0,   0.5,    "Ground",      "f"],
 	["variable_restitution_enabled",  "variable restitution",     0,      1,      1,      "Ground",      "b"],
 	["cross_2002_enabled",            "Cross-2002 spin transfer", 0,      1,      1,      "Ground",      "b"],
-	["bounce_e_t",                    "e_t (tangential)",         0.0,    1.0,    0.005,  "Ground",      "f"],
+	["bounce_e_t",                    "e_t (grip tangential)",    0.0,    1.0,    0.005,  "Ground",      "f"],
+	["bounce_e_t_surface",            "e_t_surface (Cross 2014)", 0.0,    1.0,    0.005,  "Ground",      "f"],
+	["bounce_t_retention_floor",      "v_t retention floor",      0.0,    1.0,    0.005,  "Ground",      "f"],
+	["bounce_t_retention_ceil",       "v_t retention ceil",       0.0,    1.0,    0.005,  "Ground",      "f"],
 	["bounce_mu_s",                   "μ_s (dry)",                0.0,    1.5,    0.005,  "Ground",      "f"],
 	["friction",                      "friction (legacy)",        0.0,    1.0,    0.005,  "Ground",      "f"],
 	["rolling_friction_coeff",        "rolling μ_r (dry)",        0.0,    1.0,    0.005,  "Ground",      "f"],
@@ -55,7 +62,15 @@ const PARAMS: Array = [
 	["knuckle_noise_frequency",       "noise freq (Hz)",          0.1,    5.0,    0.05,   "Knuckleball", "f"],
 	["knuckle_spike_frequency_mul",   "spike freq mul",           1.0,    10.0,   0.1,    "Knuckleball", "f"],
 	["knuckle_spike_threshold",       "spike threshold",          0.0,    1.0,    0.005,  "Knuckleball", "f"],
-	["knuckle_spike_amplitude_mul",   "spike amp mul",            1.0,    5.0,    0.05,   "Knuckleball", "f"],
+	["knuckle_spike_amplitude_mul",   "spike amp mul [legacy]",   1.0,    5.0,    0.05,   "Knuckleball", "f"],
+	# Stall+flip model (S05-A04)
+	["knuckle_cy_min",                "Cy min |arcade|",          0.0,    0.5,    0.005,  "Knuckleball", "f"],
+	["knuckle_cy_max",                "Cy max |arcade|",          0.0,    0.5,    0.005,  "Knuckleball", "f"],
+	["knuckle_stall_min",             "stall min (s)",            0.05,   1.5,    0.01,   "Knuckleball", "f"],
+	["knuckle_stall_max",             "stall max (s)",            0.05,   2.0,    0.01,   "Knuckleball", "f"],
+	["knuckle_transient_rate",        "transient rate (1/s)",     1.0,    30.0,   0.5,    "Knuckleball", "f"],
+	["knuckle_lateral_bias",          "lateral bias",             0.0,    1.0,    0.05,   "Knuckleball", "f"],
+	["knuckle_arcade_multiplier",     "arcade multiplier",        0.0,    4.0,    0.05,   "Knuckleball", "f"],
 ]
 
 const GROUPS: Array[String] = [

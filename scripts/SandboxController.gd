@@ -29,6 +29,21 @@ var _auto_launch_frames_left: int = -1
 @onready var _telemetry: Label = $HUD/Telemetry
 @onready var _force_gizmo: Node3D = get_node_or_null("ForceGizmo")
 
+# Orbit-camera state. Derived from the static initial camera_position
+# at _ready (so launching the scene with the legacy `camera_position`
+# exported value still works), then driven by RMB drag + wheel.
+var _orbit_pitch_deg: float = 60.0   ## angle above horizontal (positive = look down)
+var _orbit_yaw_deg: float = 0.0      ## around Y, 0 = facing -Z
+var _orbit_distance: float = 40.0
+var _orbit_target: Vector3 = Vector3.ZERO
+var _rmb_dragging: bool = false
+const ORBIT_PITCH_MIN: float = 5.0
+const ORBIT_PITCH_MAX: float = 88.0
+const ORBIT_DISTANCE_MIN: float = 4.0
+const ORBIT_DISTANCE_MAX: float = 120.0
+const ORBIT_DRAG_SPEED: float = 0.3   ## degrees per pixel
+const ORBIT_WHEEL_STEP: float = 2.5   ## metres per wheel notch
+
 
 func _ready() -> void:
 	_setup_camera()
@@ -46,9 +61,31 @@ func _setup_camera() -> void:
 	if _camera == null:
 		push_warning("SandboxController: Camera3D child not found")
 		return
-	_camera.global_position = camera_position
-	_camera.look_at(camera_target, Vector3.UP)
 	_camera.fov = camera_fov_degrees
+	# Derive orbit state from the legacy camera_position so the scene
+	# still opens at the broadcast view, then orbit takes over.
+	var offset: Vector3 = camera_position - camera_target
+	_orbit_target = camera_target
+	_orbit_distance = clampf(offset.length(), ORBIT_DISTANCE_MIN, ORBIT_DISTANCE_MAX)
+	if _orbit_distance > 1e-3:
+		_orbit_pitch_deg = clampf(rad_to_deg(asin(offset.y / _orbit_distance)),
+			ORBIT_PITCH_MIN, ORBIT_PITCH_MAX)
+		_orbit_yaw_deg = rad_to_deg(atan2(offset.x, offset.z))
+	_update_orbit_camera()
+
+
+func _update_orbit_camera() -> void:
+	if _camera == null:
+		return
+	var pitch_r: float = deg_to_rad(_orbit_pitch_deg)
+	var yaw_r: float = deg_to_rad(_orbit_yaw_deg)
+	var off: Vector3 = Vector3(
+		cos(pitch_r) * sin(yaw_r),
+		sin(pitch_r),
+		cos(pitch_r) * cos(yaw_r),
+	) * _orbit_distance
+	_camera.global_position = _orbit_target + off
+	_camera.look_at(_orbit_target, Vector3.UP)
 
 
 func _connect_ball_signals() -> void:
@@ -130,6 +167,10 @@ func _tick_auto_launch() -> void:
 			_launcher.launch_dead_leaf()
 		"grounder":
 			_launcher.launch_grounder_topspin()
+		"grounder_medium":
+			_launcher.launch_grounder_medium()
+		"grounder_weak":
+			_launcher.launch_grounder_weak()
 		"knuckle":
 			_launcher.launch_knuckle()
 		_:
@@ -144,12 +185,18 @@ func _update_telemetry() -> void:
 	var speed_kmh: float = v.length() * 3.6
 	var fps: float = Engine.get_frames_per_second()
 	var phys_fps: int = Engine.physics_ticks_per_second
-	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m\nFPS       %4.0f  /  phys %d Hz" % [
+	var replay_line: String = ""
+	if _ball is BallPhysics:
+		var bp: BallPhysics = _ball as BallPhysics
+		if bp.is_replay_active():
+			replay_line = "\n[REPLAY  t=%+5.2f s]" % bp.replay_cursor_offset_seconds()
+	_telemetry.text = "ball pos  %5.1f, %5.2f, %5.1f m\nspeed     %5.1f km/h  ( %5.2f m/s )\nspin      |w| %5.2f rad/s\nheight    %5.2f m\nFPS       %4.0f  /  phys %d Hz%s" % [
 		_ball.global_position.x, _ball.global_position.y, _ball.global_position.z,
 		speed_kmh, v.length(),
 		w.length(),
 		_ball.global_position.y,
 		fps, phys_fps,
+		replay_line,
 	]
 
 
@@ -173,8 +220,17 @@ func _capture_screenshot() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		_handle_key(event as InputEventKey)
-	elif event is InputEventMouseButton and event.pressed:
-		_handle_mouse(event as InputEventMouseButton)
+	elif event is InputEventMouseButton:
+		_handle_mouse_button(event as InputEventMouseButton)
+	elif event is InputEventMouseMotion and _rmb_dragging:
+		_handle_orbit_drag(event as InputEventMouseMotion)
+
+
+func _handle_orbit_drag(event: InputEventMouseMotion) -> void:
+	_orbit_yaw_deg -= event.relative.x * ORBIT_DRAG_SPEED
+	_orbit_pitch_deg = clampf(_orbit_pitch_deg - event.relative.y * ORBIT_DRAG_SPEED,
+		ORBIT_PITCH_MIN, ORBIT_PITCH_MAX)
+	_update_orbit_camera()
 
 
 func _handle_key(event: InputEventKey) -> void:
@@ -196,12 +252,22 @@ func _handle_key(event: InputEventKey) -> void:
 			if _launcher: _launcher.launch_grounder_topspin(_aim_direction())
 		KEY_4:
 			if _launcher: _launcher.launch_knuckle(_aim_direction())
+		KEY_5:
+			if _launcher: _launcher.launch_grounder_medium(_aim_direction())
+		KEY_6:
+			if _launcher: _launcher.launch_grounder_weak(_aim_direction())
 		KEY_F5:
 			_toggle_slowmo()
 		KEY_W:
 			_toggle_wet_surface()
 		KEY_G:
 			_toggle_force_gizmo()
+		KEY_P:
+			_replay_toggle()
+		KEY_PERIOD:
+			_replay_step(1)
+		KEY_COMMA:
+			_replay_step(-1)
 
 
 ## Horizontal world direction from the ball to the current mouse pointer's
@@ -230,6 +296,25 @@ func _toggle_slowmo() -> void:
 	print("[Sandbox] time_scale = %.2f" % new_scale)
 
 
+func _replay_toggle() -> void:
+	if _ball == null or not (_ball is BallPhysics):
+		return
+	var bp: BallPhysics = _ball as BallPhysics
+	if bp.is_replay_active():
+		bp.exit_replay()
+		print("[Sandbox] replay OFF (resumed from cursor)")
+	else:
+		bp.enter_replay()
+		print("[Sandbox] replay ON (cursor at newest entry)")
+
+
+func _replay_step(delta: int) -> void:
+	if _ball == null or not (_ball is BallPhysics):
+		return
+	var bp: BallPhysics = _ball as BallPhysics
+	bp.step_replay(delta)
+
+
 func _toggle_force_gizmo() -> void:
 	if _force_gizmo == null:
 		return
@@ -249,13 +334,30 @@ func _toggle_wet_surface() -> void:
 	print("[Sandbox] surface_wet = %s" % cfg.surface_wet)
 
 
-func _handle_mouse(event: InputEventMouseButton) -> void:
-	if event.button_index != MOUSE_BUTTON_LEFT:
-		return
+func _handle_mouse_button(event: InputEventMouseButton) -> void:
+	match event.button_index:
+		MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_lob_to_mouse(event.position)
+		MOUSE_BUTTON_RIGHT:
+			_rmb_dragging = event.pressed
+		MOUSE_BUTTON_WHEEL_UP:
+			if event.pressed:
+				_orbit_distance = clampf(_orbit_distance - ORBIT_WHEEL_STEP,
+					ORBIT_DISTANCE_MIN, ORBIT_DISTANCE_MAX)
+				_update_orbit_camera()
+		MOUSE_BUTTON_WHEEL_DOWN:
+			if event.pressed:
+				_orbit_distance = clampf(_orbit_distance + ORBIT_WHEEL_STEP,
+					ORBIT_DISTANCE_MIN, ORBIT_DISTANCE_MAX)
+				_update_orbit_camera()
+
+
+func _lob_to_mouse(screen_pos: Vector2) -> void:
 	if _camera == null or _launcher == null:
 		return
-	var from: Vector3 = _camera.project_ray_origin(event.position)
-	var dir: Vector3 = _camera.project_ray_normal(event.position)
+	var from: Vector3 = _camera.project_ray_origin(screen_pos)
+	var dir: Vector3 = _camera.project_ray_normal(screen_pos)
 	if dir.y >= -0.001:
 		return
 	var t: float = -from.y / dir.y
