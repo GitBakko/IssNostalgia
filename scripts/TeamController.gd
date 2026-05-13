@@ -137,7 +137,14 @@ func _physics_process(_delta: float) -> void:
 	if not is_human:
 		return
 	if controller != null and controller.consume_buffered(&"switch_player"):
+		print("[TeamCtrl %s] manual switch consumed; cycling outfield" % (
+			team_config.team_name if team_config else "?"))
 		cycle_active_outfield()
+		print("[TeamCtrl %s] new active_index = %d (player %s)" % [
+			team_config.team_name if team_config else "?",
+			active_index,
+			players[active_index].name if active_index < players.size() else "?",
+		])
 	step_autoswitch()
 
 

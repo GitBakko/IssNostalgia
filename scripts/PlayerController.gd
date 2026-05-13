@@ -151,6 +151,7 @@ func _physics_process(delta: float) -> void:
 	for suffix in [&"switch_player", &"shoot_charge", &"pass_ball"]:
 		if Input.is_action_just_pressed(_full(suffix)):
 			record_press(suffix)
+			print("[PlayerCtrl %s] press detected: %s" % [action_prefix, suffix])
 
 
 # ---- Internal -----------------------------------------------------------
