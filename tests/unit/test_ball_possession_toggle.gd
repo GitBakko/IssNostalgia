@@ -112,23 +112,26 @@ func test_release_with_no_possessor_still_stages_velocity() -> void:
 		"released signal carries null releaser when no prior possession")
 
 
-# ---- S08-T01+ collision-inert while possessed ---------------------------
+# ---- S08-T02-rework collision invariant --------------------------------
 
-func test_possession_zeroes_collision_layer_and_mask() -> void:
-	# S08-T01 carry offset 0.3 m at walk puts the ball inside the
-	# player capsule (radius 0.4 m). Without zeroing the ball's
-	# collision the penetration solver ejects the player at extreme
-	# velocity (playtest 2026-05-13). set_possessed disables; release
-	# restores.
+func test_possession_keeps_collision_layer_and_mask_unchanged() -> void:
+	# R02-F05 Architecture B: the ball stays LIVE during possession —
+	# no freeze, no collision change. This test locks in the invariant.
+	# (Previous Sprint 8 attempt zeroed collision; the always-live
+	# rework removed that hack along with the freeze hack.)
 	var saved_layer: int = ball.collision_layer
 	var saved_mask: int = ball.collision_mask
 	ball.set_possessed(stub_carrier)
-	assert_eq(ball.collision_layer, 0,
-		"While possessed, collision_layer must be 0 (collision-inert)")
-	assert_eq(ball.collision_mask, 0,
-		"While possessed, collision_mask must be 0")
-	ball.release(Vector3(8.0, 4.0, 0.0))
 	assert_eq(ball.collision_layer, saved_layer,
-		"After release, collision_layer must be restored")
+		"Possession must NOT zero collision_layer (always-live model)")
 	assert_eq(ball.collision_mask, saved_mask,
-		"After release, collision_mask must be restored")
+		"Possession must NOT zero collision_mask (always-live model)")
+	ball.release(Vector3(8.0, 4.0, 0.0))
+	assert_eq(ball.collision_layer, saved_layer)
+	assert_eq(ball.collision_mask, saved_mask)
+
+
+func test_possession_does_not_freeze_ball() -> void:
+	ball.set_possessed(stub_carrier)
+	assert_false(ball.freeze,
+		"Possession must NOT freeze the ball (always-live model)")

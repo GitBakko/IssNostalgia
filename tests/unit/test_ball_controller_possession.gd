@@ -146,51 +146,24 @@ func test_human_team_wins_simultaneous_pickup() -> void:
 		"Human team A must win tie against AI team B (S06-D03)")
 
 
-# ---- carry sync --------------------------------------------------------
+# ---- S08-T02 dribble impulse model (R02-F05 Architecture B) -----------
 
-func test_carry_position_offset_in_front_of_player() -> void:
-	# Force possession at REST (velocity 0) → carry offset uses the
-	# walk-speed minimum (0.3 m). S08-D04: speed-modulated offset, NOT
-	# the Sprint 7 fixed 0.5 m. Direct global_position write (KINEMATIC
-	# freeze blocks the staged-teleport pipeline).
-	players_a[0].global_position = Vector3(0.0, 0.0, 0.0)
-	players_a[0].velocity = Vector3.ZERO
-	bc._assign_carrier(players_a[0])
-	bc.step(0.0)
-	assert_eq(ball.global_position,
-		players_a[0].global_position + Vector3(0.0, -0.7, -0.3),
-		"At rest the carry offset uses carry_offset_min_m (0.3 m)")
-
-
-# ---- S08-T01 carry-offset modulation -----------------------------------
-
-func test_carry_offset_modulates_with_speed() -> void:
-	# At WALK speed (5.5) on a sprint-denominator (8.0) curve the
-	# normalized t = 5.5/8.0 ≈ 0.6875. With min=0.3 max=0.8 →
-	# offset = 0.3 + 0.6875 * 0.5 = 0.6438. Tolerance 5 mm.
+func test_no_position_copy_during_possession() -> void:
+	# Architecture B invariant: the ball is NOT teleported every tick to
+	# match the carrier — it's a live RigidBody3D the whole time. Setting
+	# the carrier and stepping must NOT move the ball.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	p.velocity = Vector3.ZERO
+	ball.global_position = Vector3(0.7, 0.11, -0.5)
+	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	bc.step(0.0)
-	var expected: float = -lerpf(bc.carry_offset_min_m, bc.carry_offset_max_m,
-		p.max_walk_speed / p.max_sprint_speed)
-	assert_almost_eq(ball.global_position.z, expected, 5.0e-3,
-		"Walk speed → carry z = -lerp(min, max, walk/sprint)")
-
-
-func test_carry_offset_clamped_at_sprint_max() -> void:
-	# At full sprint the offset hits carry_offset_max_m (default 0.8).
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
-	bc._assign_carrier(p)
-	bc.step(0.0)
-	assert_almost_eq(ball.global_position.z, -bc.carry_offset_max_m, 1.0e-3,
-		"Sprint speed must reach carry_offset_max_m forward")
-	# Y stays at ankle height regardless of speed.
-	assert_almost_eq(ball.global_position.y, -0.7, 1.0e-3,
-		"Y offset is speed-independent")
+	# Nothing should snap the ball to a carry-offset position.
+	bc.step(1.0 / 60.0)
+	assert_almost_eq(ball.global_position.x, 0.7, 1.0e-3,
+		"Possession must NOT teleport the ball X")
+	assert_almost_eq(ball.global_position.z, -0.5, 1.0e-3,
+		"Possession must NOT teleport the ball Z")
 
 
 # ---- release proxy ------------------------------------------------------
@@ -280,98 +253,102 @@ func test_receiver_keeps_facing_when_ball_at_rest() -> void:
 		"Ball at rest leaves the receiver's facing untouched")
 
 
-# ---- S08-T02 touch-cycle dribble (R02-F05) ------------------------------
+# ---- S08-T02 dribble impulse model (R02-F05 Architecture B) ------------
 
-func test_touch_emitted_at_walk_interval() -> void:
-	# Carrier walking → emits a TOUCH release once touch_interval_walk_s
-	# has elapsed. Ball ends up unfrozen with planar velocity matching
-	# carrier velocity * touch_speed_ratio.
+func test_dribble_impulse_fires_at_walk_interval() -> void:
+	# Carrier walking — after touch_interval_walk_s the BallController
+	# stages an apply_launch_state on the ball. Carrier flag remains
+	# (no release; ball is just nudged).
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)  ## walk
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	ball.global_position = Vector3.ZERO  ## stays inside loss radius
 	bc._assign_carrier(p)
-	# Tick less than the interval — no touch yet, still carried.
+	ball._pending_linear = null  ## set AFTER assign (which writes ZERO)
+	# Pre-interval: no impulse, still carrying.
 	bc.step(bc.touch_interval_walk_s * 0.5)
-	assert_eq(bc.get_carrier(), p, "Mid-interval still carried")
-	# Cross the interval — carrier should release.
+	assert_eq(ball._pending_linear, null,
+		"Mid-interval no impulse staged")
+	assert_eq(bc.get_carrier(), p, "Carrier flag preserved")
+	# Cross the interval: impulse applied; carrier flag still set.
 	bc.step(bc.touch_interval_walk_s * 0.6)
-	assert_null(bc.get_carrier(),
-		"After touch_interval_walk_s carrier must be cleared (TOUCH released)")
-	# Ball gained planar velocity along carrier direction.
-	var expected_v: float = p.velocity.length() * bc.ball_speed_ratio_on_touch
-	assert_almost_eq(ball._pending_linear.length(), expected_v, 1.0e-2,
-		"Touch velocity = carrier_velocity * ball_speed_ratio_on_touch")
+	assert_eq(bc.get_carrier(), p,
+		"Dribble impulse must NOT release the carrier")
+	assert_not_null(ball._pending_linear,
+		"Touch interval crossed → impulse staged via apply_launch_state")
+	var expected_speed: float = p.velocity.length() * bc.touch_velocity_factor
+	var pending: Vector3 = ball._pending_linear as Vector3
+	# XZ planar component matches carrier direction × factor.
+	var planar_speed: float = Vector2(pending.x, pending.z).length()
+	assert_almost_eq(planar_speed, expected_speed, 1.0e-2,
+		"Impulse XZ speed = carrier_speed * touch_velocity_factor")
 
 
-func test_touch_emitted_at_sprint_interval() -> void:
-	# At sprint speed the carrier hits the SPRINT touch interval first.
+func test_dribble_impulse_uses_sprint_cadence_above_walk() -> void:
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	ball.global_position = Vector3.ZERO
 	bc._assign_carrier(p)
-	# Half the SPRINT interval (which is shorter than walk) — no touch.
+	# set_possessed clears pending_linear to ZERO (not null) — set to
+	# null here so the test detects the impulse via != null.
+	ball._pending_linear = null
+	# Below sprint interval — no impulse yet.
 	bc.step(bc.touch_interval_sprint_s * 0.5)
-	assert_eq(bc.get_carrier(), p)
-	# Cross the SPRINT interval.
+	assert_eq(ball._pending_linear, null)
 	bc.step(bc.touch_interval_sprint_s * 0.6)
-	assert_null(bc.get_carrier(),
-		"Sprint cadence must use the shorter touch_interval_sprint_s")
+	assert_not_null(ball._pending_linear,
+		"Sprint cadence (touch_interval_sprint_s) must drive the impulse")
 
 
-func test_touch_skipped_when_carrier_almost_still() -> void:
-	# Below the touch_min_speed_m_s gate, no touch ever emitted.
+func test_dribble_skipped_when_carrier_almost_still() -> void:
+	# Below the touch_min_speed_m_s gate, no impulse ever staged. Drag
+	# + rolling friction stop the ball naturally near the player.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -bc.touch_min_speed_m_s * 0.5)
+	ball.global_position = Vector3.ZERO
 	bc._assign_carrier(p)
-	# Tick well past either interval.
+	# set_possessed clears pending_linear to ZERO (not null) — set to
+	# null here so the test detects the impulse via != null.
+	ball._pending_linear = null
 	bc.step(bc.touch_interval_walk_s * 5.0)
-	assert_eq(bc.get_carrier(), p,
-		"Carrier almost still → no touch emitted, still carrying")
+	assert_eq(ball._pending_linear, null,
+		"Carrier almost still → no dribble impulse")
+	assert_eq(bc.get_carrier(), p, "Carrier flag preserved")
 
 
-func test_touch_release_uses_short_lockout() -> void:
-	# Touch arms a SHORT lockout (default 0.1 s) — long enough for the
-	# 1.5 × boost to clear the 0.8 m pickup radius. SHOOT/PASS still
-	# use the longer post_release_lockout_s (0.3 s).
+func test_loss_threshold_clears_carrier() -> void:
+	# Ball drifts beyond loss_threshold_m → possession ends automatically.
+	# (Tackle sim, foot-too-fast, or pre-pickup ball runaway.)
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	p.velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	bc.step(bc.touch_interval_sprint_s + 0.01)  ## crosses interval
-	assert_null(bc.get_carrier(), "Touch fired")
-	# Lockout is the SHORT touch one — much less than SHOOT's 0.3 s.
-	assert_almost_eq(bc._pickup_lockout_remaining_s, bc.touch_lockout_s, 5.0e-2,
-		"Touch must use touch_lockout_s (short), not post_release_lockout_s")
-	# After draining the short lockout, pickup is eligible again.
-	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.5)
-	bc.step(bc.touch_lockout_s + 0.01)
-	assert_eq(bc.get_carrier(), p,
-		"After short touch lockout drains, carrier re-grabs")
+	# Place the ball outside the loss radius.
+	ball.global_position = Vector3(0.0, 0.11, -(bc.loss_threshold_m + 0.1))
+	bc.step(0.0)
+	assert_null(bc.get_carrier(),
+		"Ball beyond loss_threshold_m must clear the carrier")
 
 
-func test_touch_self_pickup_does_not_warp_facing() -> void:
-	# Carrier sprints, emits a touch, then catches the ball. The ball
-	# is moving FORWARD (carrier direction) and the carrier is chasing.
-	# At pickup time ball.linear_velocity points away from the player,
-	# so the new dot-gate in _assign_carrier must SKIP the facing warp
-	# (a warp here would face the carrier backwards, breaking dribble).
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)  ## sprint forward
-	bc._assign_carrier(p)
-	bc.step(bc.touch_interval_sprint_s + 0.01)  ## emit touch
-	assert_null(bc.get_carrier(), "Touch fired")
-	# Simulate carrier catching up — bring carrier next to ball.
-	# Ball is ahead (-Z) and moving further -Z; carrier closes the gap.
-	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.3)
-	# Reset warp state so we can detect any new warp armed by pickup.
-	p._facing_warp_remaining_s = 0.0
-	# Drain the short touch lockout so pickup is eligible.
-	bc.step(bc.touch_lockout_s + 0.01)
-	assert_eq(bc.get_carrier(), p, "Carrier re-acquires after touch")
-	assert_eq(p._facing_warp_remaining_s, 0.0,
-		"Self-pickup after TOUCH must NOT arm a facing warp")
+func test_ball_stays_unfrozen_during_possession() -> void:
+	# R02-F05 Arch B invariant: the ball is NEVER frozen while possessed.
+	bc._assign_carrier(players_a[0])
+	assert_false(ball.freeze,
+		"BallPhysics.freeze must stay false during possession (always live)")
+
+
+func test_ball_collision_active_during_possession() -> void:
+	# R02-F05 Arch B invariant: collision_layer / mask are NOT zeroed.
+	# Ball stays solid against world + other players.
+	var saved_layer: int = ball.collision_layer
+	var saved_mask: int = ball.collision_mask
+	bc._assign_carrier(players_a[0])
+	assert_eq(ball.collision_layer, saved_layer,
+		"collision_layer must be preserved during possession")
+	assert_eq(ball.collision_mask, saved_mask,
+		"collision_mask must be preserved during possession")
 
 
 func test_shoot_release_still_arms_lockout() -> void:

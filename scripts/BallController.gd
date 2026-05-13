@@ -10,17 +10,24 @@ extends Node
 ## first, so a human player and an AI player tied at the same horizontal
 ## distance always lets the human win.
 ##
-## Sprint 8 T02 adds the touch-cycle dribble (R02-F05 Architecture C):
-## while the carrier is moving the ball is periodically released forward
-## (TOUCH kind) at `ball_speed_ratio_on_touch * carrier.velocity`, then
-## re-picked up automatically when the carrier catches up. SHOOT and
-## PASS releases keep the post-release pickup lockout from Sprint 7;
-## TOUCH releases skip it (a 0.4 s sprint cadence < 0.3 s lockout).
+## Sprint 8 T02-rework adopts R02-F05 Architecture B: the ball stays
+## LIVE the whole time (no freeze, no collision change). Possession is
+## logical — the `_carrier` flag gates shoot/pass eligibility and
+## auto-switch — but the ball physics keeps integrating. While the
+## carrier is moving, BallController applies a periodic touch impulse
+## (`apply_launch_state(carrier_v * touch_velocity_factor)`) every
+## ~0.25-0.4 s in the carrier's direction of travel. Drag + rolling
+## friction handle deceleration when the carrier slows. No "glued to
+## foot" carry phase — the ball is always rolling.
+##
+## Possession ends naturally when:
+##   - SHOOT/PASS via request_release (pickup lockout armed),
+##   - the ball drifts beyond `loss_threshold_m` from the carrier
+##     (1.6 m per R02-F05; tackled / out-paced).
 
 enum ReleaseKind {
 	SHOOT,    ## intentional shot — armed by ShootingController
 	PASS,     ## intentional pass — armed by PassingController
-	TOUCH,    ## dribble touch — emitted from inside step(); no lockout
 }
 
 # ---- Tunables ------------------------------------------------------------
@@ -32,52 +39,26 @@ const PICKUP_RADIUS_SQ: float = PICKUP_RADIUS_M * PICKUP_RADIUS_M
 const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
 
-@export_group("Touch-cycle dribble (S08-T02 / R02-F05)")
-## Touch interval at WALK speed (carrier velocity ≤ max_walk). Long
-## enough that a slow build-up doesn't constantly tap the ball.
-@export var touch_interval_walk_s: float = 0.6
-## Touch interval at SPRINT speed. Short enough that a sprint dribble
-## reads as continuous touches rather than one big launch.
-@export var touch_interval_sprint_s: float = 0.4
-## Minimum carrier speed to start the touch timer at all. Below this
-## the carrier is essentially still and the ball stays glued.
-@export var touch_min_speed_m_s: float = 1.5
-## Multiplier applied to angular velocity on touch — small backspin
-## that helps the ball feel "kicked" rather than "thrown". Pure visual
-## (drag still dominates motion). 0 disables the spin entirely.
-@export var touch_backspin_rad_s: float = 1.5
-
-@export_group("Carry offset (S08-T01 / R02-F04)")
-## Carry offset along the player's local forward (-Z) at REST (velocity 0).
-## EA Pitch Notes (R02-F04): elite players keep the ball closer when slow,
-## push it further when fast.
-@export var carry_offset_min_m: float = 0.3
-## Carry offset at FULL SPRINT speed. The interpolation uses
-## `max_sprint_speed` as the denominator so walk speed produces an
-## intermediate offset (~0.65 m at default 0.3/0.8 + 5.5/8.0 ratio),
-## not the cap. Original R02-F04 lerp range was 0.3-0.5; bumped to 0.8
-## here after playtest 2026-05-13 — the 0.5 cap was indistinguishable
-## from walk because walk-speed already saturated the curve.
-@export var carry_offset_max_m: float = 0.8
-## Vertical offset from the capsule centre (always negative — capsule
-## centre sits at y≈0.9, ball-target lands at ankle height).
-@export var carry_offset_y_m: float = -0.7
-## Boost factor applied to the carrier's velocity when emitting a TOUCH
-## release (S08-T02). Must be > 1.0 — the ball needs to OUTRUN the
-## carrier briefly so it clears the 0.8 m pickup radius and the touch
-## reads visually. R02-F04's 0.88-0.95 figure refers to STEADY-STATE
-## carry speed (player retains 95 % sprint with ball); the touch
-## impulse is a different physical quantity. Default 1.5 → at sprint
-## (8 m/s) the ball leaves at 12 m/s, drag bleeds it back below sprint
-## speed in ~0.3 s, carrier catches up and re-acquires.
-@export var ball_speed_ratio_on_touch: float = 1.5
-## Brief pickup lockout for TOUCH releases — separate from the long
-## SHOOT/PASS lockout. Without this the ball is still inside the
-## carrier's pickup radius the very next tick (carry offset ≈ 0.65 m
-## < 0.8 m radius) and the dribble silently no-ops. 0.1 s = ~12 ticks
-## at 120 Hz, enough for a 1.5 × velocity boost to push the ball past
-## the radius.
-@export var touch_lockout_s: float = 0.1
+@export_group("Dribble impulses (S08-T02 / R02-F05 Arch B)")
+## Touch interval at WALK speed. Time between successive nudges in the
+## carrier's direction of travel.
+@export var touch_interval_walk_s: float = 0.35
+## Touch interval at SPRINT speed. Faster footstep cadence.
+@export var touch_interval_sprint_s: float = 0.25
+## Minimum carrier speed to start emitting impulses. Below this the
+## carrier is essentially still — let drag + rolling friction stop the
+## ball naturally near the player.
+@export var touch_min_speed_m_s: float = 1.0
+## Boost factor applied to carrier velocity when nudging the ball.
+## Slightly > 1.0 so the ball stays a touch ahead of the carrier and
+## drag can chew the boost down between impulses. R02-F04 says elite
+## carriers retain 88-95 % of sprint speed with ball — equivalent to
+## ball speed slightly ahead of the carrier on average. Default 1.10.
+@export var touch_velocity_factor: float = 1.10
+## Loss threshold (R02-F05). When the ball drifts beyond this distance
+## from the carrier on the XZ plane, possession is automatically
+## released — the carrier ran past it / got tackled / lost touch.
+@export var loss_threshold_m: float = 1.6
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -107,10 +88,6 @@ var _ordered_teams: Array[TeamController] = []
 var _last_log_pickup_dist_sq: float = INF
 var _pickup_lockout_remaining_s: float = 0.0
 var _touch_timer_s: float = 0.0
-## Last release kind — used by _assign_carrier to decide whether to
-## arm a facing warp on pickup. TOUCH self-pickup must NOT warp
-## (carrier chasing their own touch, ball moves AWAY from them).
-var _last_release_kind: ReleaseKind = ReleaseKind.SHOOT
 
 
 func _ready() -> void:
@@ -127,10 +104,10 @@ func is_carried() -> bool:
 	return _carrier != null
 
 
-## Proxy for shoot / pass / touch triggers. Releases the ball and clears
-## the carrier flag. SHOOT and PASS arm the post-release pickup lockout
-## (anti re-grab safety from Sprint 7 fix2). TOUCH skips the lockout
-## (touch interval ≤ lockout duration would deadlock the dribble).
+## Proxy for shoot / pass triggers. Releases the ball with a launch
+## velocity and arms the anti re-grab lockout (Sprint 7 fix2). The
+## kind argument is informational for logging / future per-release
+## animation timing.
 func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
 		kind: ReleaseKind = ReleaseKind.SHOOT) -> void:
 	if _carrier == null or ball == null:
@@ -139,16 +116,9 @@ func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
 		print("[BallController] RELEASE (%s) by %s, |v|=%.2f m/s, |ω|=%.2f rad/s" % [
 			ReleaseKind.keys()[kind], _carrier.name, velocity.length(), angular.length(),
 		])
-	_last_release_kind = kind
 	_clear_carrier_flag()
 	_carrier = null
-	# SHOOT/PASS use the long anti re-grab lockout; TOUCH uses a short
-	# one just long enough to let the impulse clear the pickup radius.
-	if kind == ReleaseKind.TOUCH:
-		_pickup_lockout_remaining_s = touch_lockout_s
-	else:
-		_pickup_lockout_remaining_s = post_release_lockout_s
-	# Reset the touch timer so the next pickup starts fresh.
+	_pickup_lockout_remaining_s = post_release_lockout_s
 	_touch_timer_s = 0.0
 	ball.release(velocity, angular)
 
@@ -162,19 +132,43 @@ func step(delta: float) -> void:
 		_pickup_lockout_remaining_s = maxf(0.0, _pickup_lockout_remaining_s - delta)
 	if _carrier == null:
 		_try_pickup()
-	else:
-		_sync_carry_position()
-		_tick_touch_cycle(delta)
+		return
+	# Carrier present — check loss first, then nudge the ball.
+	if _check_loss():
+		return
+	_tick_dribble_impulses(delta)
 
 
-## Touch-cycle dribble (R02-F05). While the carrier is moving above the
-## min-speed gate, tick a timer; when it hits the speed-appropriate
-## interval, emit a TOUCH release. Pure on-instance; tests drive it
-## via explicit step(delta).
-func _tick_touch_cycle(delta: float) -> void:
+## R02-F05 loss threshold: ball drifts beyond `loss_threshold_m` from
+## the carrier on the XZ plane → possession lost. Returns true when
+## the carrier was cleared this tick.
+func _check_loss() -> bool:
+	if _carrier == null:
+		return false
+	var dx: float = ball.global_position.x - _carrier.global_position.x
+	var dz: float = ball.global_position.z - _carrier.global_position.z
+	if dx * dx + dz * dz > loss_threshold_m * loss_threshold_m:
+		if debug_log:
+			print("[BallController] LOSS — %s lost ball at d=%.2fm" % [
+				_carrier.name, sqrt(dx * dx + dz * dz),
+			])
+		_clear_carrier_flag()
+		_carrier = null
+		_touch_timer_s = 0.0
+		return true
+	return false
+
+
+## Periodic touch impulse (R02-F05 Architecture B / R02-F04 emergent
+## carry). Sets ball velocity to `carrier.velocity * touch_velocity_factor`
+## every `touch_interval_walk_s` (or sprint variant) while the carrier
+## is moving above the min-speed gate. Drag bleeds the impulse between
+## ticks; the carrier catches up briefly between nudges.
+func _tick_dribble_impulses(delta: float) -> void:
 	if _carrier == null:
 		return
-	var carrier_speed: float = _carrier.velocity.length()
+	var carrier_v: Vector3 = _carrier.velocity
+	var carrier_speed: float = carrier_v.length()
 	if carrier_speed < touch_min_speed_m_s:
 		_touch_timer_s = 0.0
 		return
@@ -184,27 +178,24 @@ func _tick_touch_cycle(delta: float) -> void:
 	var interval: float = touch_interval_walk_s
 	if carrier_speed > _carrier.max_walk_speed:
 		interval = touch_interval_sprint_s
-	if _touch_timer_s >= interval:
-		_emit_touch()
-		_touch_timer_s = 0.0
-
-
-## Emit a TOUCH release: ball gets the carrier's planar velocity scaled
-## by `ball_speed_ratio_on_touch` plus a small backspin. Carrier will
-## chase the ball and re-pickup automatically once within radius.
-func _emit_touch() -> void:
-	if _carrier == null or ball == null:
+	if _touch_timer_s < interval:
 		return
-	var planar: Vector3 = Vector3(_carrier.velocity.x, 0.0, _carrier.velocity.z)
-	var touch_velocity: Vector3 = planar * ball_speed_ratio_on_touch
-	var touch_angular: Vector3 = Vector3.ZERO
-	if touch_backspin_rad_s > 0.0 and planar.length_squared() > 1.0e-4:
-		# Backspin axis: (UP × forward_dir) — a touch grounder gets a
-		# slight backwards roll like a real push pass. Magnitude small
-		# enough that drag dominates motion.
-		var dir: Vector3 = planar.normalized()
-		touch_angular = Vector3.UP.cross(dir) * (-touch_backspin_rad_s)
-	request_release(touch_velocity, touch_angular, ReleaseKind.TOUCH)
+	_touch_timer_s = 0.0
+	_apply_touch_impulse(carrier_v)
+
+
+## Set ball linear velocity to `carrier_v * touch_velocity_factor` on
+## the XZ plane via the BallPhysics pending pipeline. Ball stays live —
+## no freeze, no carrier flag changes.
+func _apply_touch_impulse(carrier_v: Vector3) -> void:
+	var planar: Vector3 = Vector3(carrier_v.x, 0.0, carrier_v.z)
+	var target: Vector3 = planar * touch_velocity_factor
+	# Preserve current Y velocity (e.g. a small bounce mid-roll) — only
+	# overwrite XZ. We do this by reading the live velocity and patching
+	# the X/Z components.
+	var live: Vector3 = ball.linear_velocity
+	target.y = live.y
+	ball.apply_launch_state(target)
 
 
 # ---- Lifecycle -----------------------------------------------------------
@@ -273,37 +264,6 @@ func _try_pickup() -> void:
 		_last_log_pickup_dist_sq = nearest_dist_sq
 
 
-func _sync_carry_position() -> void:
-	if _carrier == null:
-		return
-	# Speed-modulated forward offset (S08-D04 / R02-F04): walk → 0.3 m,
-	# sprint → 0.5 m. Linear in carrier_speed/max_walk_speed, clamped at
-	# the walk threshold so anything ≥ walk speed reads as "sprint" for
-	# the offset curve.
-	var offset_local: Vector3 = _compute_carry_offset_local(_carrier)
-	# Use VisualRoot basis (S07-T06) so the ball follows the rendered
-	# mesh, not the (always-identity) collision capsule.
-	var world_offset: Vector3 = _carrier.get_visual_basis() * offset_local
-	var target: Vector3 = _carrier.global_position + world_offset
-	# CRITICAL: while the ball is KINEMATIC-frozen, `_integrate_forces` does
-	# NOT run, so `teleport_to` (which stages _pending_teleport for the
-	# integrator) silently no-ops. In KINEMATIC freeze the engine accepts
-	# direct `global_position` writes — we use those instead. The pending
-	# pipeline is only for unfrozen-launch flows.
-	ball.global_position = target
-
-
-## Player-local carry offset for the given carrier. Pure function — tests
-## drive it directly with explicit Player state.
-func _compute_carry_offset_local(carrier: Player) -> Vector3:
-	# Use SPRINT speed as the denominator so walk speed produces an
-	# intermediate offset (≈ 0.65 m with defaults), not the cap. The
-	# Sprint 7 test fixture used max_walk; updated 2026-05-13 after
-	# playtest reported "sprint feels same as walk".
-	var max_speed: float = maxf(0.001, carrier.max_sprint_speed)
-	var t: float = clampf(carrier.velocity.length() / max_speed, 0.0, 1.0)
-	var z_offset: float = -lerpf(carry_offset_min_m, carry_offset_max_m, t)
-	return Vector3(0.0, carry_offset_y_m, z_offset)
 
 
 func _assign_carrier(player: Player) -> void:
