@@ -22,9 +22,17 @@ const PLAYER_SCENE: PackedScene = preload("res://scenes/Player.tscn")
 @onready var hud_active_label: Label = $HUD/ActiveLabel
 
 @export_group("Debug")
-## When true, Team B is also human (debug only — alt InputMap binds added in
-## T06). Sprint 6 default = false; the human-only flow is the primary loop.
+## When true, Team B is also human-driven via the `p2_*` action set
+## (Arrow keys / RShift / Numpad-Enter). S06-D29 — debug-only, never
+## ships to a real match. Toggle in the editor before launching the
+## scene; runtime toggling is not supported in Sprint 6.
 @export var both_human: bool = false
+
+## How many metres a single debug ball-move keypress nudges the MockBall.
+## Tasti `[` `]` `;` `'` per ±X / ±Z; `B` per posizione random sul campo.
+@export var debug_ball_step_m: float = 1.0
+@export var debug_ball_field_half_x: float = 30.0   ## random clamp X
+@export var debug_ball_field_half_z: float = 45.0   ## random clamp Z
 
 # ---- Runtime state -------------------------------------------------------
 var team_a_root: Node3D
@@ -74,15 +82,18 @@ func _spawn_team_b() -> void:
 	team_b_root.name = "TeamB"
 	add_child(team_b_root)
 	players_b = _instantiate_players(team_b_root, team_b_config, true)
-	# T05: Team B is AI — no PlayerController. T06 adds the p2_ controller
-	# under the both_human flag.
+	if both_human:
+		team_b_player_ctrl = PlayerController.new()
+		team_b_player_ctrl.name = "PlayerControllerB"
+		team_b_player_ctrl.action_prefix = "p2_"
+		team_b_root.add_child(team_b_player_ctrl)
 	team_b_ctrl = TeamController.new()
 	team_b_ctrl.name = "TeamControllerB"
 	team_b_ctrl.players = players_b
-	team_b_ctrl.controller = null
+	team_b_ctrl.controller = team_b_player_ctrl  ## null when both_human=false
 	team_b_ctrl.team_config = team_b_config
 	team_b_ctrl.ball_ref = mock_ball
-	team_b_ctrl.is_human = false
+	team_b_ctrl.is_human = both_human
 	team_b_root.add_child(team_b_ctrl)
 
 
@@ -105,6 +116,43 @@ func _instantiate_players(root: Node3D, team: TeamConfig, mirror_z: bool) -> Arr
 
 func _process(_delta: float) -> void:
 	_update_hud()
+	_handle_debug_ball_input()
+
+
+# ---- Debug ball-move helpers (T06) ---------------------------------------
+
+func _handle_debug_ball_input() -> void:
+	if mock_ball == null:
+		return
+	if Input.is_action_just_pressed(&"debug_ball_xm"):
+		move_ball_relative(-debug_ball_step_m, 0.0)
+	if Input.is_action_just_pressed(&"debug_ball_xp"):
+		move_ball_relative(debug_ball_step_m, 0.0)
+	if Input.is_action_just_pressed(&"debug_ball_zm"):
+		move_ball_relative(0.0, -debug_ball_step_m)
+	if Input.is_action_just_pressed(&"debug_ball_zp"):
+		move_ball_relative(0.0, debug_ball_step_m)
+	if Input.is_action_just_pressed(&"debug_ball_random"):
+		randomize_ball_position()
+
+
+## Nudge the MockBall by (dx, dz) metres on the ground plane. Public so
+## tests / other dev tooling can drive it without going through Input.
+func move_ball_relative(dx: float, dz: float) -> void:
+	if mock_ball == null:
+		return
+	var p: Vector3 = mock_ball.global_position
+	mock_ball.global_position = Vector3(p.x + dx, p.y, p.z + dz)
+
+
+## Teleport the MockBall to a random pitch position. Useful to provoke
+## auto-switch / formation transitions during T05/T06 playtests.
+func randomize_ball_position() -> void:
+	if mock_ball == null:
+		return
+	var rx: float = randf_range(-debug_ball_field_half_x, debug_ball_field_half_x)
+	var rz: float = randf_range(-debug_ball_field_half_z, debug_ball_field_half_z)
+	mock_ball.global_position = Vector3(rx, mock_ball.global_position.y, rz)
 
 
 func _update_hud() -> void:
@@ -117,11 +165,21 @@ func _update_hud() -> void:
 	var role: String = ""
 	if active.role_index < formation.role_labels.size():
 		role = formation.role_labels[active.role_index]
-	hud_active_label.text = "ACTIVE: %s — %s   stamina: %.2f" % [
-		team_a_config.team_name,
-		role,
-		active.stamina,
+	var line_a: String = "P1 %s — %s   stamina: %.2f" % [
+		team_a_config.team_name, role, active.stamina,
 	]
+	if both_human and team_b_player_ctrl != null:
+		var b_active: Player = team_b_player_ctrl.player
+		var b_role: String = ""
+		if b_active != null and b_active.role_index < formation.role_labels.size():
+			b_role = formation.role_labels[b_active.role_index]
+		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f" % [
+			line_a, team_b_config.team_name,
+			b_role,
+			b_active.stamina if b_active else 0.0,
+		]
+	else:
+		hud_active_label.text = line_a
 
 
 # ---- Diagnostics ---------------------------------------------------------

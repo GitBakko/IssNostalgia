@@ -83,8 +83,10 @@ func test_hud_label_updates_with_active_player() -> void:
 	m._update_hud()
 	var lbl: Label = m.hud_active_label
 	assert_not_null(lbl)
-	assert_true(lbl.text.contains("ACTIVE"), "HUD label must include 'ACTIVE' tag")
+	assert_true(lbl.text.begins_with("P1 "),
+		"HUD line for human player 1 must start with 'P1 ', got: %s" % lbl.text)
 	assert_true(lbl.text.contains("TEAM A"), "HUD must show team A name")
+	assert_true(lbl.text.contains("stamina"), "HUD must show stamina")
 
 
 func test_mock_ball_present_at_origin_height() -> void:
@@ -92,3 +94,56 @@ func test_mock_ball_present_at_origin_height() -> void:
 	assert_not_null(m.mock_ball, "MockBall must be wired")
 	assert_almost_eq(m.mock_ball.global_position.y, 0.11, 1.0e-3,
 		"MockBall sits at ball-radius height (no physics yet, just visual)")
+
+
+# ---- T06 — debug ball move + both_human ---------------------------------
+
+func test_debug_move_ball_relative_updates_position() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	var p0: Vector3 = m.mock_ball.global_position
+	m.move_ball_relative(2.0, -3.0)
+	assert_almost_eq(m.mock_ball.global_position.x, p0.x + 2.0, 1.0e-3)
+	assert_almost_eq(m.mock_ball.global_position.z, p0.z - 3.0, 1.0e-3)
+	assert_almost_eq(m.mock_ball.global_position.y, p0.y, 1.0e-3,
+		"Y stays at ball-radius height (debug move is XZ only)")
+
+
+func test_debug_random_ball_inside_field_bounds() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	# Run several randomisations — each must land within the configured
+	# half-field bounds.
+	for _i in 20:
+		m.randomize_ball_position()
+		var p: Vector3 = m.mock_ball.global_position
+		assert_lte(absf(p.x), m.debug_ball_field_half_x + 1.0e-3,
+			"Random ball X must respect debug_ball_field_half_x cap")
+		assert_lte(absf(p.z), m.debug_ball_field_half_z + 1.0e-3,
+			"Random ball Z must respect debug_ball_field_half_z cap")
+
+
+func test_both_human_disabled_team_b_has_no_player_controller() -> void:
+	# Default scene has both_human=false.
+	var m: GameMatch = scene_root as GameMatch
+	assert_false(m.both_human, "Scene default: both_human=false")
+	assert_null(m.team_b_player_ctrl,
+		"Without both_human, Team B must NOT spawn a PlayerController")
+	assert_false(m.team_b_ctrl.is_human,
+		"Without both_human, Team B is AI side")
+
+
+func test_both_human_enabled_spawns_p2_controller() -> void:
+	# Tear down the default scene and rebuild with both_human=true.
+	scene_root.queue_free()
+	scene_root = preload("res://scenes/GameMatch.tscn").instantiate()
+	(scene_root as GameMatch).both_human = true
+	add_child(scene_root)
+	var m: GameMatch = scene_root as GameMatch
+	assert_true(m.both_human)
+	assert_not_null(m.team_b_player_ctrl,
+		"both_human=true must spawn a PlayerController for Team B")
+	assert_eq(m.team_b_player_ctrl.action_prefix, "p2_",
+		"Team B controller must use the p2_ action prefix")
+	assert_true(m.team_b_ctrl.is_human,
+		"both_human=true flips Team B to human-driven")
+	assert_eq(m.team_b_ctrl.controller, m.team_b_player_ctrl,
+		"Team B controller wired to its own PlayerController")
