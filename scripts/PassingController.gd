@@ -109,7 +109,7 @@ func try_pass() -> bool:
 		print("[PassingController] PASS to %s @ d=%.2fm |v|=%.2f m/s" % [tname, distance, velocity.length()])
 
 	var spin: Vector3 = _resolve_pass_spin(dir, distance)
-	ball_controller.request_release(velocity, spin)
+	ball_controller.request_release(velocity, spin, BallController.ReleaseKind.PASS)
 
 	# Receiver pre-orientation warp — fired NOW, not at pickup, so the
 	# target teammate visibly turns toward the passer while the ball is

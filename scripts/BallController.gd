@@ -9,6 +9,19 @@ extends Node
 ## Tie-breaker on simultaneous pickup (S06-D03): human teams iterated
 ## first, so a human player and an AI player tied at the same horizontal
 ## distance always lets the human win.
+##
+## Sprint 8 T02 adds the touch-cycle dribble (R02-F05 Architecture C):
+## while the carrier is moving the ball is periodically released forward
+## (TOUCH kind) at `ball_speed_ratio_on_touch * carrier.velocity`, then
+## re-picked up automatically when the carrier catches up. SHOOT and
+## PASS releases keep the post-release pickup lockout from Sprint 7;
+## TOUCH releases skip it (a 0.4 s sprint cadence < 0.3 s lockout).
+
+enum ReleaseKind {
+	SHOOT,    ## intentional shot — armed by ShootingController
+	PASS,     ## intentional pass — armed by PassingController
+	TOUCH,    ## dribble touch — emitted from inside step(); no lockout
+}
 
 # ---- Tunables ------------------------------------------------------------
 ## Horizontal pickup radius. 0.8 m matches the project spec.
@@ -18,6 +31,21 @@ const PICKUP_RADIUS_SQ: float = PICKUP_RADIUS_M * PICKUP_RADIUS_M
 ## be cleanly picked up — 12 m/s matches the project spec.
 const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
+
+@export_group("Touch-cycle dribble (S08-T02 / R02-F05)")
+## Touch interval at WALK speed (carrier velocity ≤ max_walk). Long
+## enough that a slow build-up doesn't constantly tap the ball.
+@export var touch_interval_walk_s: float = 0.6
+## Touch interval at SPRINT speed. Short enough that a sprint dribble
+## reads as continuous touches rather than one big launch.
+@export var touch_interval_sprint_s: float = 0.4
+## Minimum carrier speed to start the touch timer at all. Below this
+## the carrier is essentially still and the ball stays glued.
+@export var touch_min_speed_m_s: float = 1.5
+## Multiplier applied to angular velocity on touch — small backspin
+## that helps the ball feel "kicked" rather than "thrown". Pure visual
+## (drag still dominates motion). 0 disables the spin entirely.
+@export var touch_backspin_rad_s: float = 1.5
 
 @export_group("Carry offset (S08-T01 / R02-F04)")
 ## Carry offset along the player's local forward (-Z) at REST (velocity 0).
@@ -67,6 +95,11 @@ var _carrier: Player = null
 var _ordered_teams: Array[TeamController] = []
 var _last_log_pickup_dist_sq: float = INF
 var _pickup_lockout_remaining_s: float = 0.0
+var _touch_timer_s: float = 0.0
+## Last release kind — used by _assign_carrier to decide whether to
+## arm a facing warp on pickup. TOUCH self-pickup must NOT warp
+## (carrier chasing their own touch, ball moves AWAY from them).
+var _last_release_kind: ReleaseKind = ReleaseKind.SHOOT
 
 
 func _ready() -> void:
@@ -83,19 +116,25 @@ func is_carried() -> bool:
 	return _carrier != null
 
 
-## Proxy for shoot / pass triggers. Shoots the ball and clears the
-## carrier flag in the same call so the next pickup-scan tick sees a
-## clean slate. No-op if nobody currently carries the ball.
-func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO) -> void:
+## Proxy for shoot / pass / touch triggers. Releases the ball and clears
+## the carrier flag. SHOOT and PASS arm the post-release pickup lockout
+## (anti re-grab safety from Sprint 7 fix2). TOUCH skips the lockout
+## (touch interval ≤ lockout duration would deadlock the dribble).
+func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
+		kind: ReleaseKind = ReleaseKind.SHOOT) -> void:
 	if _carrier == null or ball == null:
 		return
 	if debug_log:
-		print("[BallController] RELEASE by %s, |v|=%.2f m/s, |ω|=%.2f rad/s" % [
-			_carrier.name, velocity.length(), angular.length(),
+		print("[BallController] RELEASE (%s) by %s, |v|=%.2f m/s, |ω|=%.2f rad/s" % [
+			ReleaseKind.keys()[kind], _carrier.name, velocity.length(), angular.length(),
 		])
+	_last_release_kind = kind
 	_clear_carrier_flag()
 	_carrier = null
-	_pickup_lockout_remaining_s = post_release_lockout_s
+	if kind != ReleaseKind.TOUCH:
+		_pickup_lockout_remaining_s = post_release_lockout_s
+	# Reset the touch timer so the next pickup starts fresh.
+	_touch_timer_s = 0.0
 	ball.release(velocity, angular)
 
 
@@ -110,6 +149,47 @@ func step(delta: float) -> void:
 		_try_pickup()
 	else:
 		_sync_carry_position()
+		_tick_touch_cycle(delta)
+
+
+## Touch-cycle dribble (R02-F05). While the carrier is moving above the
+## min-speed gate, tick a timer; when it hits the speed-appropriate
+## interval, emit a TOUCH release. Pure on-instance; tests drive it
+## via explicit step(delta).
+func _tick_touch_cycle(delta: float) -> void:
+	if _carrier == null:
+		return
+	var carrier_speed: float = _carrier.velocity.length()
+	if carrier_speed < touch_min_speed_m_s:
+		_touch_timer_s = 0.0
+		return
+	_touch_timer_s += delta
+	# Pick interval by speed regime — anything > max_walk_speed counts
+	# as sprint cadence.
+	var interval: float = touch_interval_walk_s
+	if carrier_speed > _carrier.max_walk_speed:
+		interval = touch_interval_sprint_s
+	if _touch_timer_s >= interval:
+		_emit_touch()
+		_touch_timer_s = 0.0
+
+
+## Emit a TOUCH release: ball gets the carrier's planar velocity scaled
+## by `ball_speed_ratio_on_touch` plus a small backspin. Carrier will
+## chase the ball and re-pickup automatically once within radius.
+func _emit_touch() -> void:
+	if _carrier == null or ball == null:
+		return
+	var planar: Vector3 = Vector3(_carrier.velocity.x, 0.0, _carrier.velocity.z)
+	var touch_velocity: Vector3 = planar * ball_speed_ratio_on_touch
+	var touch_angular: Vector3 = Vector3.ZERO
+	if touch_backspin_rad_s > 0.0 and planar.length_squared() > 1.0e-4:
+		# Backspin axis: (UP × forward_dir) — a touch grounder gets a
+		# slight backwards roll like a real push pass. Magnitude small
+		# enough that drag dominates motion.
+		var dir: Vector3 = planar.normalized()
+		touch_angular = Vector3.UP.cross(dir) * (-touch_backspin_rad_s)
+	request_release(touch_velocity, touch_angular, ReleaseKind.TOUCH)
 
 
 # ---- Lifecycle -----------------------------------------------------------
@@ -221,10 +301,17 @@ func _assign_carrier(player: Player) -> void:
 	# enough that the carry offset (in the player's local forward, -Z)
 	# doesn't visibly drag the ball through their old forward, slow
 	# enough that it reads as a natural turn rather than a scatto.
-	# No-op when the ball is at rest (first pickup, dead-ball restarts).
+	# Gates:
+	#   - ball at rest → no warp (first pickup, dead-ball restarts).
+	#   - ball moving AWAY from the player → no warp (carrier chasing
+	#     their own touch from S08-T02 dribble; warp would face them
+	#     backwards). Detected via dot(ball_vel, player_pos - ball_pos).
 	var ball_vel: Vector3 = ball.linear_velocity
 	if ball_vel.length_squared() > 0.01:
-		player.start_facing_warp(-ball_vel)
+		var to_player: Vector3 = player.global_position - ball.global_position
+		to_player.y = 0.0
+		if ball_vel.dot(to_player) > 0.0:
+			player.start_facing_warp(-ball_vel)
 	ball.set_possessed(player)
 
 

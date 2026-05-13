@@ -102,7 +102,7 @@ func fire_shot(hold_s: float, dir_input: Vector3) -> bool:
 	if speed > auto_topspin_threshold:
 		spin = BallLauncher.compose_spin(dir, auto_topspin_rad_s, 0.0, 0.0)
 
-	ball_controller.request_release(launch_velocity, spin)
+	ball_controller.request_release(launch_velocity, spin, BallController.ReleaseKind.SHOOT)
 
 	# Auto-switch gate (S06 spec A2) + Player state for HUD / debug
 	_shoot_anim_remaining_s = shoot_anim_duration_s

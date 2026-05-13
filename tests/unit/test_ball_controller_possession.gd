@@ -245,7 +245,11 @@ func test_receiver_starts_facing_warp_toward_incoming_ball() -> void:
 	# Reset visual-root facing to -Z (default). S07-T06: rotation lives on
 	# VisualRoot, not on the CharacterBody3D itself.
 	players_a[0].get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
-	ball.global_position = Vector3(0.4, 0.0, 0.0)
+	# Ball ARRIVING at player from -X (i.e. ball is at x=-0.4 heading +X
+	# toward the player at origin). S08-T02 gate: warp only when
+	# dot(ball_vel, player_pos - ball_pos) > 0 — i.e. ball is heading
+	# TOWARD the player. Pure-receive scenario.
+	ball.global_position = Vector3(-0.4, 0.0, 0.0)
 	ball.linear_velocity = Vector3(8.0, 0.0, 0.0)  ## ball moving +X
 	bc.step(0.0)  ## triggers _try_pickup → _assign_carrier
 	assert_eq(bc.get_carrier(), players_a[0], "Sanity: pickup fired")
@@ -274,6 +278,109 @@ func test_receiver_keeps_facing_when_ball_at_rest() -> void:
 	var forward: Vector3 = players_a[0].get_visual_forward()
 	assert_almost_eq(forward.z, -1.0, 1.0e-3,
 		"Ball at rest leaves the receiver's facing untouched")
+
+
+# ---- S08-T02 touch-cycle dribble (R02-F05) ------------------------------
+
+func test_touch_emitted_at_walk_interval() -> void:
+	# Carrier walking → emits a TOUCH release once touch_interval_walk_s
+	# has elapsed. Ball ends up unfrozen with planar velocity matching
+	# carrier velocity * touch_speed_ratio.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)  ## walk
+	bc._assign_carrier(p)
+	# Tick less than the interval — no touch yet, still carried.
+	bc.step(bc.touch_interval_walk_s * 0.5)
+	assert_eq(bc.get_carrier(), p, "Mid-interval still carried")
+	# Cross the interval — carrier should release.
+	bc.step(bc.touch_interval_walk_s * 0.6)
+	assert_null(bc.get_carrier(),
+		"After touch_interval_walk_s carrier must be cleared (TOUCH released)")
+	# Ball gained planar velocity along carrier direction.
+	var expected_v: float = p.velocity.length() * bc.ball_speed_ratio_on_touch
+	assert_almost_eq(ball._pending_linear.length(), expected_v, 1.0e-2,
+		"Touch velocity = carrier_velocity * ball_speed_ratio_on_touch")
+
+
+func test_touch_emitted_at_sprint_interval() -> void:
+	# At sprint speed the carrier hits the SPRINT touch interval first.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	bc._assign_carrier(p)
+	# Half the SPRINT interval (which is shorter than walk) — no touch.
+	bc.step(bc.touch_interval_sprint_s * 0.5)
+	assert_eq(bc.get_carrier(), p)
+	# Cross the SPRINT interval.
+	bc.step(bc.touch_interval_sprint_s * 0.6)
+	assert_null(bc.get_carrier(),
+		"Sprint cadence must use the shorter touch_interval_sprint_s")
+
+
+func test_touch_skipped_when_carrier_almost_still() -> void:
+	# Below the touch_min_speed_m_s gate, no touch ever emitted.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -bc.touch_min_speed_m_s * 0.5)
+	bc._assign_carrier(p)
+	# Tick well past either interval.
+	bc.step(bc.touch_interval_walk_s * 5.0)
+	assert_eq(bc.get_carrier(), p,
+		"Carrier almost still → no touch emitted, still carrying")
+
+
+func test_touch_release_kind_skips_lockout() -> void:
+	# Same-tick race: touch release → BallController.step pickup attempt
+	# must succeed (no lockout) so the carrier instantly re-acquires
+	# at the next physics tick instead of stalling.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	bc._assign_carrier(p)
+	bc.step(bc.touch_interval_sprint_s + 0.01)  ## crosses interval
+	assert_null(bc.get_carrier(), "Touch fired")
+	# No lockout → pickup gate is open; bring carrier next to ball
+	# (in a real frame the carrier closes the distance via velocity;
+	# here we set it explicitly to drive the pickup synchronously).
+	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.5)
+	# Ball still has launch velocity but well within pickup speed gate
+	# (player walk = 5.5, sprint = 8 → < 12 m/s gate).
+	bc.step(0.0)
+	assert_eq(bc.get_carrier(), p,
+		"Touch release must NOT arm pickup lockout — carrier re-grabs")
+
+
+func test_touch_self_pickup_does_not_warp_facing() -> void:
+	# Carrier sprints, emits a touch, then catches the ball. The ball
+	# is moving FORWARD (carrier direction) and the carrier is chasing.
+	# At pickup time ball.linear_velocity points away from the player,
+	# so the new dot-gate in _assign_carrier must SKIP the facing warp
+	# (a warp here would face the carrier backwards, breaking dribble).
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)  ## sprint forward
+	bc._assign_carrier(p)
+	bc.step(bc.touch_interval_sprint_s + 0.01)  ## emit touch
+	assert_null(bc.get_carrier(), "Touch fired")
+	# Simulate carrier catching up — bring carrier next to ball.
+	# Ball is ahead (-Z) and moving further -Z; carrier closes the gap.
+	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.3)
+	# Reset warp state so we can detect any new warp armed by pickup.
+	p._facing_warp_remaining_s = 0.0
+	bc.step(0.0)
+	assert_eq(bc.get_carrier(), p, "Carrier re-acquires after touch")
+	assert_eq(p._facing_warp_remaining_s, 0.0,
+		"Self-pickup after TOUCH must NOT arm a facing warp")
+
+
+func test_shoot_release_still_arms_lockout() -> void:
+	# Sanity: SHOOT release path keeps the Sprint 7 lockout behaviour.
+	bc._assign_carrier(players_a[0])
+	bc.request_release(Vector3(20.0, 0.0, 0.0))  ## default kind = SHOOT
+	bc.step(0.0)
+	assert_null(bc.get_carrier(),
+		"SHOOT lockout must still block immediate re-pickup")
 
 
 func test_pickup_resumes_after_lockout_expires() -> void:
