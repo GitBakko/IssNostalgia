@@ -110,3 +110,25 @@ func test_release_with_no_possessor_still_stages_velocity() -> void:
 	await get_tree().process_frame
 	assert_eq(captured_releaser, null,
 		"released signal carries null releaser when no prior possession")
+
+
+# ---- S08-T01+ collision-inert while possessed ---------------------------
+
+func test_possession_zeroes_collision_layer_and_mask() -> void:
+	# S08-T01 carry offset 0.3 m at walk puts the ball inside the
+	# player capsule (radius 0.4 m). Without zeroing the ball's
+	# collision the penetration solver ejects the player at extreme
+	# velocity (playtest 2026-05-13). set_possessed disables; release
+	# restores.
+	var saved_layer: int = ball.collision_layer
+	var saved_mask: int = ball.collision_mask
+	ball.set_possessed(stub_carrier)
+	assert_eq(ball.collision_layer, 0,
+		"While possessed, collision_layer must be 0 (collision-inert)")
+	assert_eq(ball.collision_mask, 0,
+		"While possessed, collision_mask must be 0")
+	ball.release(Vector3(8.0, 4.0, 0.0))
+	assert_eq(ball.collision_layer, saved_layer,
+		"After release, collision_layer must be restored")
+	assert_eq(ball.collision_mask, saved_mask,
+		"After release, collision_mask must be restored")

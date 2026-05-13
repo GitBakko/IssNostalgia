@@ -145,6 +145,15 @@ var _pending_angular: Variant = null
 # the carrier owns the ball's transform via direct writes (KINEMATIC
 # freeze handles the Godot side). Cleared by `release()`.
 var _possessed_by: Node3D = null
+# Saved collision layer / mask so we can restore them on release.
+# While possessed the ball is collision-INERT (layer=0, mask=0) so the
+# carrier's CharacterBody3D capsule doesn't see it as an obstacle when
+# the carry offset (S08-T01 walk → 0.3 m) puts the ball inside the
+# capsule's 0.4 m radius. Without this the penetration solver ejects
+# the player at extreme velocity (playtest 2026-05-13: player flying
+# out of bounds the instant pickup fires).
+var _saved_collision_layer: int = 1
+var _saved_collision_mask: int = 1
 
 ## Emitted at the start of the physics tick AFTER `release()` runs, so
 ## listeners (BallController / HUD / audio) can react with a guaranteed-
@@ -407,6 +416,12 @@ func set_possessed(by_node: Node3D) -> void:
 	_possessed_by = by_node
 	_pending_linear = Vector3.ZERO
 	_pending_angular = Vector3.ZERO
+	# Disable collision while possessed — see _saved_collision_* note
+	# (prevents player capsule penetration ejection on close carry).
+	_saved_collision_layer = collision_layer
+	_saved_collision_mask = collision_mask
+	collision_layer = 0
+	collision_mask = 0
 	set_deferred("freeze", true)
 
 
@@ -418,6 +433,10 @@ func set_possessed(by_node: Node3D) -> void:
 func release(velocity: Vector3, angular: Vector3 = Vector3.ZERO) -> void:
 	var releaser: Node3D = _possessed_by
 	_possessed_by = null
+	# Restore collision layer / mask BEFORE unfreezing so the ball
+	# re-enters the world solid the moment the integrator runs.
+	collision_layer = _saved_collision_layer
+	collision_mask = _saved_collision_mask
 	set_deferred("freeze", false)
 	apply_launch_state(velocity, angular)
 	# Defer the signal so listeners read the post-release state, not the
