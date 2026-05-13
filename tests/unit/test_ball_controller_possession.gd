@@ -165,26 +165,29 @@ func test_carry_position_offset_in_front_of_player() -> void:
 # ---- S08-T01 carry-offset modulation -----------------------------------
 
 func test_carry_offset_modulates_with_speed() -> void:
-	# At HALF max_walk_speed the offset must sit halfway between min
-	# (0.3) and max (0.5) — i.e. 0.4 m forward.
+	# At WALK speed (5.5) on a sprint-denominator (8.0) curve the
+	# normalized t = 5.5/8.0 ≈ 0.6875. With min=0.3 max=0.8 →
+	# offset = 0.3 + 0.6875 * 0.5 = 0.6438. Tolerance 5 mm.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed * 0.5)
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
 	bc._assign_carrier(p)
 	bc.step(0.0)
-	assert_almost_eq(ball.global_position.z, -0.4, 1.0e-3,
-		"Half-walk speed → carry z offset = -lerp(0.3, 0.5, 0.5) = -0.4")
+	var expected: float = -lerpf(bc.carry_offset_min_m, bc.carry_offset_max_m,
+		p.max_walk_speed / p.max_sprint_speed)
+	assert_almost_eq(ball.global_position.z, expected, 5.0e-3,
+		"Walk speed → carry z = -lerp(min, max, walk/sprint)")
 
 
-func test_carry_offset_clamped_at_walk_max() -> void:
-	# Sprint speed > max_walk → offset capped at carry_offset_max_m.
+func test_carry_offset_clamped_at_sprint_max() -> void:
+	# At full sprint the offset hits carry_offset_max_m (default 0.8).
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)  ## 8 m/s > 5.5
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
 	bc._assign_carrier(p)
 	bc.step(0.0)
-	assert_almost_eq(ball.global_position.z, -0.5, 1.0e-3,
-		"Sprint speed must clamp carry offset at carry_offset_max_m (0.5 m)")
+	assert_almost_eq(ball.global_position.z, -bc.carry_offset_max_m, 1.0e-3,
+		"Sprint speed must reach carry_offset_max_m forward")
 	# Y stays at ankle height regardless of speed.
 	assert_almost_eq(ball.global_position.y, -0.7, 1.0e-3,
 		"Y offset is speed-independent")

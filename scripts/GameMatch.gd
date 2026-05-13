@@ -40,6 +40,12 @@ const PLAYER_SCENE: PackedScene = preload("res://scenes/Player.tscn")
 ## bounds AFTER lerp).
 @export var camera_bounds_half_x_m: float = 50.0
 @export var camera_bounds_half_z_m: float = 30.0
+## When the ball is loose AND moving faster than this, the camera
+## switches to ball-only tracking (skips the player weight). Without
+## this, a long shot causes auto-switch to flip the active player
+## across the trajectory and the centroid lurches → visible tilt.
+## Default 5 m/s = above the 12 m/s pickup gate floor with margin.
+@export var camera_flight_ball_speed_threshold: float = 5.0
 
 @export_group("Camera debug controls (Sprint 8 dev-tool)")
 ## Initial distance from the rig pivot to the Camera3D, in metres.
@@ -237,15 +243,29 @@ func _update_camera(delta: float) -> void:
 		return
 	var active: Player = team_a_player_ctrl.player if team_a_player_ctrl else null
 	var player_pos: Vector3 = active.global_position if active != null else ball.global_position
-	# XZ-only weighted centroid — Y stays at 0 (rig rides on the pitch).
 	var ball_pos: Vector3 = ball.global_position
-	var w_b: float = clampf(camera_ball_weight, 0.0, 1.0)
-	var w_p: float = 1.0 - w_b
-	var target: Vector3 = Vector3(
-		ball_pos.x * w_b + player_pos.x * w_p,
-		0.0,
-		ball_pos.z * w_b + player_pos.z * w_p,
+	# Ball-in-flight detection (S08-T01++ playtest fix): when the ball
+	# is loose and fast, follow the BALL only — otherwise auto-switch
+	# flips active across the trajectory and the centroid lurches into
+	# a visible camera tilt. When carried / at rest, the weighted
+	# centroid (R06-F01) frames action + carrier together as before.
+	var ball_speed: float = ball.linear_velocity.length()
+	var in_flight: bool = (
+		not ball.is_possessed()
+		and ball_speed > camera_flight_ball_speed_threshold
 	)
+	var target: Vector3
+	if in_flight:
+		target = Vector3(ball_pos.x, 0.0, ball_pos.z)
+	else:
+		# XZ-only weighted centroid — Y stays at 0 (rig rides on pitch).
+		var w_b: float = clampf(camera_ball_weight, 0.0, 1.0)
+		var w_p: float = 1.0 - w_b
+		target = Vector3(
+			ball_pos.x * w_b + player_pos.x * w_p,
+			0.0,
+			ball_pos.z * w_b + player_pos.z * w_p,
+		)
 	# FR-independent lerp (R06-F06): 1 - pow(decay, delta * 60). At
 	# delta = 1/60 the per-frame alpha = 1 - decay; at higher / lower
 	# fps the response time stays constant.

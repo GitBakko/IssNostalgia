@@ -20,13 +20,17 @@ const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
 
 @export_group("Carry offset (S08-T01 / R02-F04)")
-## Carry offset along the player's local forward (-Z) at WALK speed.
-## EA Pitch Notes (R02-F04): elite players keep the ball closer when
-## walking, push it further when sprinting.
+## Carry offset along the player's local forward (-Z) at REST (velocity 0).
+## EA Pitch Notes (R02-F04): elite players keep the ball closer when slow,
+## push it further when fast.
 @export var carry_offset_min_m: float = 0.3
-## Carry offset along the player's local forward (-Z) at SPRINT (and
-## above) speed. The actual offset is `lerp(min, max, speed/max_walk)`.
-@export var carry_offset_max_m: float = 0.5
+## Carry offset at FULL SPRINT speed. The interpolation uses
+## `max_sprint_speed` as the denominator so walk speed produces an
+## intermediate offset (~0.65 m at default 0.3/0.8 + 5.5/8.0 ratio),
+## not the cap. Original R02-F04 lerp range was 0.3-0.5; bumped to 0.8
+## here after playtest 2026-05-13 — the 0.5 cap was indistinguishable
+## from walk because walk-speed already saturated the curve.
+@export var carry_offset_max_m: float = 0.8
 ## Vertical offset from the capsule centre (always negative — capsule
 ## centre sits at y≈0.9, ball-target lands at ankle height).
 @export var carry_offset_y_m: float = -0.7
@@ -197,8 +201,12 @@ func _sync_carry_position() -> void:
 ## Player-local carry offset for the given carrier. Pure function — tests
 ## drive it directly with explicit Player state.
 func _compute_carry_offset_local(carrier: Player) -> Vector3:
-	var max_walk: float = maxf(0.001, carrier.max_walk_speed)
-	var t: float = clampf(carrier.velocity.length() / max_walk, 0.0, 1.0)
+	# Use SPRINT speed as the denominator so walk speed produces an
+	# intermediate offset (≈ 0.65 m with defaults), not the cap. The
+	# Sprint 7 test fixture used max_walk; updated 2026-05-13 after
+	# playtest reported "sprint feels same as walk".
+	var max_speed: float = maxf(0.001, carrier.max_sprint_speed)
+	var t: float = clampf(carrier.velocity.length() / max_speed, 0.0, 1.0)
 	var z_offset: float = -lerpf(carry_offset_min_m, carry_offset_max_m, t)
 	return Vector3(0.0, carry_offset_y_m, z_offset)
 

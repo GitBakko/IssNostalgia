@@ -192,6 +192,26 @@ func test_camera_rig_follows_weighted_centroid_after_steps() -> void:
 		"CameraRig Y stays on the pitch plane")
 
 
+func test_camera_rig_tracks_ball_only_during_flight() -> void:
+	var m: GameMatch = scene_root as GameMatch
+	await get_tree().physics_frame
+	# Ball loose AND fast → flight mode; player position must NOT
+	# influence the target.
+	m.ball.teleport_to(Vector3(15.0, 0.11, 5.0))
+	m.ball.apply_launch_state(Vector3(20.0, 0.0, 0.0))  ## |v|=20 > 5
+	m.players_a[0].global_position = Vector3(-30.0, 0.0, -30.0)
+	await get_tree().physics_frame
+	for _i in 200:
+		m._update_camera(1.0 / 60.0)
+	# Ball moves during the flight — sample its post-loop position to
+	# compare against the rig (it should converge on the live ball
+	# position, not on the stale teleport target).
+	assert_almost_eq(m.camera_rig.global_position.x, m.ball.global_position.x, 1.0,
+		"In flight, rig X tracks ball X (ignores player)")
+	assert_almost_eq(m.camera_rig.global_position.z, m.ball.global_position.z, 1.0,
+		"In flight, rig Z tracks ball Z (ignores player)")
+
+
 func test_camera_rig_clamped_to_bounds() -> void:
 	var m: GameMatch = scene_root as GameMatch
 	# Drag both ball and player far past the bounds — rig must clamp.
