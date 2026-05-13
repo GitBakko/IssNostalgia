@@ -49,6 +49,16 @@ const INPUT_DEAD_ZONE_SQ: float = 1.0e-4
 ## range (5-10). At dt=1/120 with rotation_speed=8 the alpha per tick is
 ## `1 - 0.5^(8/120) ≈ 0.045`.
 @export var rotation_speed: float = 8.0
+## Boosted rotation speed used during a `start_facing_warp` window
+## (R09-F04 FIFA Animation Warping pattern: facing warps within 1-2
+## physics ticks while body / animation catches up). 50 rad/s gives
+## ~99 % facing convergence in ~110 ms — fast enough to feel
+## responsive on a pass reception, not so fast it reads as a snap.
+@export var rotation_speed_warp: float = 50.0
+## Default warp duration. The warp speed only applies for this window;
+## after it expires the normal `rotation_speed` resumes. 150 ms covers
+## the worst-case 180° turn at the warp rate without overshooting.
+@export var facing_warp_duration_s: float = 0.15
 
 @export_group("Visual")
 ## Optional front marker (small BoxMesh) used in Phase 2 to make the
@@ -72,6 +82,10 @@ var _driven_this_tick: bool = false
 ## Read-only intent — do not write from outside BallController, or HUD
 ## state desyncs from the actual carry. Sprint 7 T02.
 var has_ball: bool = false
+## When > 0, `update_facing` uses `rotation_speed_warp` instead of
+## `rotation_speed` (R09-F04 facing warp window — used by BallController
+## on pickup). Drained by `update_facing(delta)`.
+var _facing_warp_remaining_s: float = 0.0
 
 
 func _ready() -> void:
@@ -128,17 +142,25 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 
 ## Frame-rate-independent rotation of the visual basis toward `_facing_target`.
 ## Called from `_physics_process` and exposed for tests / Sprint 7 facing snap.
+## When `_facing_warp_remaining_s > 0`, the boosted `rotation_speed_warp`
+## replaces the baseline rate (R09-F04 FIFA Animation Warping window —
+## used by BallController on pickup so the receiver smoothly turns
+## TOWARD the incoming ball over ~100-150 ms instead of either slerping
+## for ~400 ms or snapping in one tick).
 func update_facing(dt: float) -> void:
 	if _facing_target.length_squared() < INPUT_DEAD_ZONE_SQ:
 		return
+	var rate: float = rotation_speed
+	if _facing_warp_remaining_s > 0.0:
+		rate = rotation_speed_warp
+		_facing_warp_remaining_s = maxf(0.0, _facing_warp_remaining_s - dt)
 	# Basis.looking_at: -Z (model forward) points at the target direction.
 	# Capsule is symmetric on Y, but the front marker mesh exposes the
 	# direction so the player isn't visually a featureless pill.
 	var target_basis: Basis = Basis.looking_at(_facing_target, Vector3.UP)
-	# alpha = 1 - 0.5^(rotation_speed * dt). At rotation_speed=8 and dt=1/120
-	# alpha ≈ 0.045 per tick, so 99 % of the rotation completes in ~50 ticks
-	# (~0.4 s). Frame-rate independent — same response at 30/60/120 fps.
-	var alpha: float = 1.0 - pow(0.5, rotation_speed * dt)
+	# alpha = 1 - 0.5^(rate * dt). Frame-rate independent — same response
+	# at 30/60/120 fps. Baseline 20: 99 % in ~160 ms. Warp 50: 99 % in ~110 ms.
+	var alpha: float = 1.0 - pow(0.5, rate * dt)
 	transform.basis = transform.basis.slerp(target_basis, alpha)
 
 
@@ -149,11 +171,11 @@ func is_busy_with_ball_action() -> bool:
 
 
 ## Snap the visual facing AND the rotation target to a direction now —
-## bypasses the slerp from `update_facing`. Used by BallController when
-## a player receives a pass: the carry offset is in the player's local
-## forward, so without this snap the ball would visually attach behind
-## or to the side of the receiver depending on their stale facing.
-## Direction is XZ-only; Y is dropped. No-op on near-zero input.
+## bypasses the slerp from `update_facing`. Reserved for cases that
+## REALLY need a hard snap (Sprint 6 Q-switch, debug teleports). For
+## reception-style "turn toward the ball" prefer `start_facing_warp`
+## which is smooth (R09-F04). Direction is XZ-only; Y is dropped.
+## No-op on near-zero input.
 func set_facing_immediate(direction: Vector3) -> void:
 	var planar: Vector3 = Vector3(direction.x, 0.0, direction.z)
 	if planar.length_squared() < INPUT_DEAD_ZONE_SQ:
@@ -161,6 +183,27 @@ func set_facing_immediate(direction: Vector3) -> void:
 	planar = planar.normalized()
 	_facing_target = planar
 	transform.basis = Basis.looking_at(planar, Vector3.UP)
+
+
+## Turn toward `direction` over a brief warp window — uses the boosted
+## `rotation_speed_warp` for `duration_s` seconds, then resumes the
+## baseline `rotation_speed`. R09-F04 FIFA Animation Warping pattern:
+## "rotate the mesh facing toward input within 1-2 physics ticks while
+## the body / animation catches up." Smoother than `set_facing_immediate`
+## (no scatto) but much faster than baseline slerp. Used by
+## BallController when a player picks up an incoming pass.
+##   duration_s defaults to `facing_warp_duration_s` (0.15 s).
+func start_facing_warp(direction: Vector3, duration_s: float = -1.0) -> void:
+	var planar: Vector3 = Vector3(direction.x, 0.0, direction.z)
+	if planar.length_squared() < INPUT_DEAD_ZONE_SQ:
+		return
+	planar = planar.normalized()
+	_facing_target = planar
+	if duration_s < 0.0:
+		duration_s = facing_warp_duration_s
+	# Always extend (max), never shorten — overlapping warps just keep
+	# the longer window so chained passes don't fall back to slow slerp.
+	_facing_warp_remaining_s = maxf(_facing_warp_remaining_s, duration_s)
 
 
 # ---- Lifecycle ----------------------------------------------------------
