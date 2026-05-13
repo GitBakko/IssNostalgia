@@ -52,6 +52,7 @@ shadow_enabled = true
 collision_mask = 0
 
 [node name="PitchMesh" type="MeshInstance3D" parent="Pitch" unique_id=853200694]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.005818844, -1.1920929e-07, 0.0031785965)
 material_override = SubResource("Mat_pitch")
 mesh = SubResource("PlaneMesh_pitch")
 
@@ -79,7 +80,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.2, 1.22, 52.5)
 material_override = SubResource("Mat_goal")
 mesh = SubResource("BoxMesh_goal_post")
 
-[node name="Ball" parent="." instance=ExtResource("5_ball_scene")]
+[node name="Ball" parent="." unique_id=1639151480 instance=ExtResource("5_ball_scene")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=189825235]

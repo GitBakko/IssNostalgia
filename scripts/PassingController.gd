@@ -27,6 +27,9 @@ extends Node
 @export var ball_controller: BallController
 @export var ball_launcher: BallLauncher
 
+## Print every try_pass with reject reason. Off by default.
+@export var debug_log: bool = false
+
 @export_group("Target selection")
 ## cos(45°) ≈ 0.707 — R03-F05 cone half-angle. Teammates with a forward
 ## projection above this are eligible passes. Tighter values (0.866 = 30°)
@@ -60,11 +63,17 @@ var _pass_anim_remaining_s: float = 0.0
 ## `_physics_process` calls it on a buffered E press.
 func try_pass() -> bool:
 	if ball_controller == null or team_controller == null or ball_launcher == null:
+		if debug_log: print("[PassingController] reject: missing wiring")
 		return false
 	var active: Player = _active_player()
 	if active == null:
+		if debug_log: print("[PassingController] reject: no active player")
 		return false
 	if ball_controller.get_carrier() != active:
+		if debug_log:
+			var carrier_name: String = "<none>" if ball_controller.get_carrier() == null \
+				else ball_controller.get_carrier().name
+			print("[PassingController] reject: active %s != carrier %s" % [active.name, carrier_name])
 		return false
 
 	var target_player: Player = select_pass_target(active)
@@ -72,11 +81,16 @@ func try_pass() -> bool:
 	var dir: Vector3 = _xz_dir(active.global_position, target_pos)
 	var distance: float = _xz_distance(active.global_position, target_pos)
 	if distance < 0.5:
+		if debug_log: print("[PassingController] reject: degenerate distance %.2f" % distance)
 		return false  ## degenerate — can't pass to yourself
 
 	var velocity: Vector3 = ball_launcher.compute_velocity_to_point(target_pos)
 	if velocity == Vector3.ZERO:
+		if debug_log: print("[PassingController] reject: launcher returned ZERO velocity")
 		return false
+	if debug_log:
+		var tname: String = "<fallback>" if target_player == null else target_player.name
+		print("[PassingController] PASS to %s @ d=%.2fm |v|=%.2f m/s" % [tname, distance, velocity.length()])
 
 	var spin: Vector3 = _resolve_pass_spin(dir, distance)
 	ball_controller.request_release(velocity, spin)

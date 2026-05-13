@@ -149,16 +149,20 @@ func test_human_team_wins_simultaneous_pickup() -> void:
 # ---- carry sync --------------------------------------------------------
 
 func test_carry_position_offset_in_front_of_player() -> void:
-	# Force possession, then step and check teleport target.
+	# Force possession, then step and check the ball lands at the
+	# expected world offset. The integrator is frozen during carry so
+	# BallController writes `global_position` directly (KINEMATIC freeze
+	# accepts direct writes; the staged-teleport pipeline only flushes
+	# when _integrate_forces runs, which it doesn't while frozen).
 	players_a[0].global_position = Vector3(0.0, 0.0, 0.0)
-	# Default basis: -Z is forward. carry_offset = (0, -0.2, 0.5).
-	# After basis * offset, world offset = (0, -0.2, 0.5).
+	# Default basis: -Z is forward. CARRY_OFFSET_LOCAL = (0, -0.7, -0.5).
+	# After basis * offset, world offset = (0, -0.7, -0.5) — i.e. 0.5 m
+	# in front of the player and at ankle height.
 	bc._assign_carrier(players_a[0])
 	bc.step(0.0)
-	# teleport_to stages _pending_teleport on the ball.
-	assert_eq(ball._pending_teleport,
-		players_a[0].global_position + Vector3(0.0, -0.2, 0.5),
-		"Carry sync must stage teleport to player_pos + basis*offset")
+	assert_eq(ball.global_position,
+		players_a[0].global_position + Vector3(0.0, -0.7, -0.5),
+		"Carry sync must place ball at player_pos + basis*CARRY_OFFSET_LOCAL")
 
 
 # ---- release proxy ------------------------------------------------------

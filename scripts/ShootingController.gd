@@ -21,6 +21,10 @@ extends Node
 @export var team_controller: TeamController
 @export var ball_controller: BallController
 
+## Print charge start / release / fire-rejection. Off by default — flip on
+## when diagnosing "Space does nothing" reports.
+@export var debug_log: bool = false
+
 @export_group("Charge")
 ## Below this hold the press is treated as a tap (no shot fires).
 @export var charge_min_s: float = 0.3
@@ -63,6 +67,8 @@ var _shoot_anim_remaining_s: float = 0.0
 ## or when the hold is below `charge_min_s`. Returns true on success.
 func fire_shot(hold_s: float, dir_input: Vector3) -> bool:
 	if hold_s < charge_min_s:
+		if debug_log:
+			print("[ShootingController] reject: hold %.2fs < min %.2fs" % [hold_s, charge_min_s])
 		return false
 	if ball_controller == null or team_controller == null:
 		return false
@@ -70,6 +76,12 @@ func fire_shot(hold_s: float, dir_input: Vector3) -> bool:
 	if shooter == null:
 		return false
 	if ball_controller.get_carrier() != shooter:
+		if debug_log:
+			var carrier_name: String = "<none>" if ball_controller.get_carrier() == null \
+				else ball_controller.get_carrier().name
+			print("[ShootingController] reject: active %s != carrier %s" % [
+				shooter.name, carrier_name,
+			])
 		return false
 
 	var t_norm: float = clampf(
@@ -132,6 +144,8 @@ func _physics_process(delta: float) -> void:
 		if not _is_charging:
 			_is_charging = true
 			_charge_hold_s = 0.0
+			if debug_log:
+				print("[ShootingController] CHARGE start (action=%s)" % _full_action(ctrl, &"shoot_charge"))
 		_charge_hold_s += delta
 		var t_norm: float = clampf(
 			(_charge_hold_s - charge_min_s) / (charge_max_s - charge_min_s),
@@ -140,6 +154,8 @@ func _physics_process(delta: float) -> void:
 		charge_changed.emit(t_norm)
 	elif _is_charging:
 		# Released — fire if eligible, then reset.
+		if debug_log:
+			print("[ShootingController] RELEASE after %.2fs" % _charge_hold_s)
 		fire_shot(_charge_hold_s, ctrl.read_movement_input())
 		_reset_charge()
 		charge_changed.emit(0.0)

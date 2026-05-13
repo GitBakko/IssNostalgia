@@ -18,9 +18,10 @@ const PICKUP_RADIUS_SQ: float = PICKUP_RADIUS_M * PICKUP_RADIUS_M
 ## be cleanly picked up — 12 m/s matches the project spec.
 const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
-## Carry offset in player-local space. 0.5 m forward, 0.2 m below the
-## capsule centre — approximates the player's feet (S07-D03 / R02-F06).
-const CARRY_OFFSET_LOCAL: Vector3 = Vector3(0.0, -0.2, 0.5)
+## Carry offset in player-local space. 0.5 m FORWARD (-Z, Godot model
+## convention), 0.7 m below the capsule centre so the ball sits at ~ankle
+## height (capsule is 1.8 m tall, centre at y=0.9). S07-D03 / R02-F06.
+const CARRY_OFFSET_LOCAL: Vector3 = Vector3(0.0, -0.7, -0.5)
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -29,9 +30,14 @@ const CARRY_OFFSET_LOCAL: Vector3 = Vector3(0.0, -0.2, 0.5)
 ## `is_human` (true first) at _ready.
 @export var teams: Array[TeamController] = []
 
+## Print every pickup attempt + carrier change. Off by default — flip on
+## from the editor when diagnosing "the ball doesn't latch" complaints.
+@export var debug_log: bool = false
+
 # ---- Runtime state -------------------------------------------------------
 var _carrier: Player = null
 var _ordered_teams: Array[TeamController] = []
+var _last_log_pickup_dist_sq: float = INF
 
 
 func _ready() -> void:
@@ -54,6 +60,10 @@ func is_carried() -> bool:
 func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO) -> void:
 	if _carrier == null or ball == null:
 		return
+	if debug_log:
+		print("[BallController] RELEASE by %s, |v|=%.2f m/s, |ω|=%.2f rad/s" % [
+			_carrier.name, velocity.length(), angular.length(),
+		])
 	_clear_carrier_flag()
 	_carrier = null
 	ball.release(velocity, angular)
@@ -99,15 +109,37 @@ func _try_pickup() -> void:
 	if ball.is_possessed():
 		return
 	var ball_pos: Vector3 = ball.global_position
+	var nearest_dist_sq: float = INF
+	var nearest: Player = null
 	for team in _ordered_teams:
 		for p in team.players:
 			if p == null or p.is_goalkeeper:
 				continue  ## Sprint 7 GK doesn't pick up — Sprint 8 logic
 			var dx: float = p.global_position.x - ball_pos.x
 			var dz: float = p.global_position.z - ball_pos.z
-			if dx * dx + dz * dz <= PICKUP_RADIUS_SQ:
+			var d_sq: float = dx * dx + dz * dz
+			if d_sq < nearest_dist_sq:
+				nearest_dist_sq = d_sq
+				nearest = p
+			if d_sq <= PICKUP_RADIUS_SQ:
+				if debug_log:
+					print("[BallController] PICKUP %s @ d=%.2fm (radius=%.2fm)" % [
+						p.name, sqrt(d_sq), PICKUP_RADIUS_M,
+					])
 				_assign_carrier(p)
+				_last_log_pickup_dist_sq = INF
 				return  ## tie-breaker: first hit wins (humans iterated first)
+	# No pickup this tick — log progress when the nearest player gets
+	# meaningfully closer than the previous best (every 0.5 m bracket).
+	if debug_log and nearest != null:
+		var bracket: float = floor(sqrt(nearest_dist_sq) / 0.5) * 0.5
+		var prev_bracket: float = floor(sqrt(_last_log_pickup_dist_sq) / 0.5) * 0.5
+		if bracket < prev_bracket:
+			print("[BallController] near miss: %s @ d=%.2fm (need ≤ %.2fm), ball|v|=%.2f" % [
+				nearest.name, sqrt(nearest_dist_sq), PICKUP_RADIUS_M,
+				ball.linear_velocity.length(),
+			])
+		_last_log_pickup_dist_sq = nearest_dist_sq
 
 
 func _sync_carry_position() -> void:
@@ -117,9 +149,12 @@ func _sync_carry_position() -> void:
 	# with the player so the ball stays "in front of" them as they turn.
 	var world_offset: Vector3 = _carrier.transform.basis * CARRY_OFFSET_LOCAL
 	var target: Vector3 = _carrier.global_position + world_offset
-	# Stage via teleport_to so the change goes through the integrator
-	# pipeline (consistent with how reset / debug-move write the ball).
-	ball.teleport_to(target)
+	# CRITICAL: while the ball is KINEMATIC-frozen, `_integrate_forces` does
+	# NOT run, so `teleport_to` (which stages _pending_teleport for the
+	# integrator) silently no-ops. In KINEMATIC freeze the engine accepts
+	# direct `global_position` writes — we use those instead. The pending
+	# pipeline is only for unfrozen-launch flows.
+	ball.global_position = target
 
 
 func _assign_carrier(player: Player) -> void:
