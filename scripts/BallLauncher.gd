@@ -207,15 +207,20 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var t_flight: float = 2.0 * v_vertical / 9.81
 	var v_horizontal: float = dist / t_flight   # vacuum guess
-	for _i in 4:
+	print("[lob solver] origin=%s target=%s dist=%.2f h=%.2f vy=%.2f v_h_vacuum=%.2f knuckle_was=%s" % [
+		origin, target_xz, dist, h, v_vertical, v_horizontal, _ball.is_knuckle_active()])
+	for it in 4:
 		var v0: Vector3 = dir * v_horizontal + Vector3.UP * v_vertical
 		var landing: float = _simulated_landing_distance(origin, v0)
+		print("[lob solver] iter %d v_h=%.3f predicted_landing=%.3f ratio=%.3f" % [
+			it, v_horizontal, landing, dist / landing if landing > 0.1 else 0.0])
 		if landing <= 0.5:
 			break
 		var ratio: float = dist / landing
 		if absf(ratio - 1.0) < 0.01:
 			break
 		v_horizontal *= ratio
+	print("[lob solver] FINAL v_h=%.3f vy=%.3f → launching" % [v_horizontal, v_vertical])
 	launch(dir * v_horizontal + Vector3.UP * v_vertical, Vector3.ZERO)
 
 
