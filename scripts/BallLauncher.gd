@@ -225,13 +225,24 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 ## Returns the horizontal (XZ) distance from `p0` to the first descent
 ## crossing of ground level; falls back to the last simulated point if
 ## the trajectory hasn't landed within ~5 s.
+##
+## Knuckle state is forced OFF for the duration of the prediction:
+## `_knuckle_active_for_shot` is sticky from the previous shot, so a
+## prior KEY_4 launch would otherwise inject a stall-flip lateral force
+## into the simulation, shorten the simulated landing, and trick the
+## iterative solver into massively overshooting the click on the
+## subsequent (spinless) live launch. The flag is restored before
+## returning so the next live shot's intent is preserved.
 func _simulated_landing_distance(p0: Vector3, v0: Vector3) -> float:
 	if _ball == null:
 		return 0.0
 	const SUB_DT: float = 1.0 / 240.0
 	const STEPS: int = 1200
+	var prev_knuckle: bool = _ball.is_knuckle_active()
+	_ball.set_knuckle_active(false)
 	var positions: PackedVector3Array = _ball.predict_forward(
 		p0, v0, Vector3.ZERO, 0.0, STEPS, SUB_DT)
+	_ball.set_knuckle_active(prev_knuckle)
 	var ground_y: float = p0.y
 	var ascended: bool = false
 	for i in STEPS:
