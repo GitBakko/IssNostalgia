@@ -94,38 +94,42 @@ func test_cross_spin_changes_omega() -> void:
 
 # --- Surface toggle -------------------------------------------------------
 
-func test_wet_surface_reduces_friction() -> void:
+func test_wet_surface_increases_friction() -> void:
+	# S05-A09: wet pitch model flipped — wet now means "muddy / sticky"
+	# (more grip on impact, more rolling drag), not "glide" (S03-A10).
 	cfg.surface_wet = false
 	var mu_dry: float = ball._mu_s()
 	cfg.surface_wet = true
 	var mu_wet: float = ball._mu_s()
-	assert_lt(mu_wet, mu_dry,
-		"Wet μ_s must be lower than dry (dry %.3f, wet %.3f)" % [mu_dry, mu_wet])
+	assert_gt(mu_wet, mu_dry,
+		"Wet μ_s must be higher than dry (dry %.3f, wet %.3f)" % [mu_dry, mu_wet])
 
 
-func test_wet_surface_reduces_rolling_friction() -> void:
+func test_wet_surface_increases_rolling_friction() -> void:
 	cfg.surface_wet = false
 	var roll_dry: float = ball._rolling_friction()
 	cfg.surface_wet = true
 	var roll_wet: float = ball._rolling_friction()
-	assert_lt(roll_wet, roll_dry, "Wet rolling friction must be lower than dry")
+	assert_gt(roll_wet, roll_dry, "Wet rolling friction must be higher than dry (sticky pitch)")
 
 
 # --- Per-zone surfaces (S05-A08, Sprint 5 T05) ----------------------------
 
 func test_wet_zone_overrides_global_dry() -> void:
 	# Global flag dry, but stepping into a wet zone must switch all four
-	# surface-aware getters to their wet values.
+	# surface-aware getters to their wet values. After S05-A09 wet means
+	# muddy: more friction (μ_s, rolling) but lower restitution and
+	# softer grass kicks (water dampens the blade snap).
 	cfg.surface_wet = false
 	var mu_dry: float = ball._mu_s()
 	var roll_dry: float = ball._rolling_friction()
 	var e_dry: float = ball._restitution_base()
 	var kick_dry: float = ball._grass_kick_amount()
 	ball.enter_wet_zone()
-	assert_lt(ball._mu_s(), mu_dry, "Zone wet must lower μ_s below dry")
-	assert_lt(ball._rolling_friction(), roll_dry, "Zone wet must lower rolling friction")
-	assert_lt(ball._restitution_base(), e_dry, "Zone wet must lower e_base")
-	assert_lt(ball._grass_kick_amount(), kick_dry, "Zone wet must lower grass kick")
+	assert_gt(ball._mu_s(), mu_dry, "Zone wet must raise μ_s above dry (sticky)")
+	assert_gt(ball._rolling_friction(), roll_dry, "Zone wet must raise rolling friction")
+	assert_lt(ball._restitution_base(), e_dry, "Zone wet must lower e_base (mushy bounce)")
+	assert_lt(ball._grass_kick_amount(), kick_dry, "Zone wet must lower grass kick (water damps blades)")
 	ball.exit_wet_zone()
 	assert_eq(ball._mu_s(), mu_dry, "Exiting the only wet zone restores dry μ_s")
 

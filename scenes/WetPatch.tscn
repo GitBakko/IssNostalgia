@@ -3,10 +3,10 @@
 [ext_resource type="Script" path="res://scripts/SurfaceZone.gd" id="1_zone"]
 
 [sub_resource type="BoxShape3D" id="BoxShape_zone"]
-size = Vector3(5.0, 0.4, 5.0)
+size = Vector3(10.0, 0.4, 10.0)
 
 [sub_resource type="BoxMesh" id="BoxMesh_zone"]
-size = Vector3(5.0, 0.02, 5.0)
+size = Vector3(10.0, 0.02, 10.0)
 
 [sub_resource type="StandardMaterial3D" id="Mat_wet"]
 albedo_color = Color(0.16, 0.30, 0.50, 0.65)
