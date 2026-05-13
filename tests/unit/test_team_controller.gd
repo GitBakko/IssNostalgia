@@ -128,28 +128,57 @@ func test_autoswitch_resets_hold_when_target_changes() -> void:
 
 # ---- manual cycle Q -------------------------------------------------------
 
-func test_manual_cycle_mutes_autoswitch_for_cooldown_window() -> void:
-	# S06-D31: a manual cycle/set_active should suspend autoswitch for
-	# MANUAL_OVERRIDE_FRAMES so the user's choice actually sticks.
-	# Setup: ball near player[3] (F at +5,0,5); active = 0 (LB at -15,0,-35).
+func test_manual_cycle_mutes_autoswitch_while_ball_static() -> void:
+	# S06-D31 refresh condition (b): a parked ball keeps the manual
+	# override alive indefinitely. With MockBall stationary in T05 the
+	# user's Q selection must NOT be undone after the base 2 s window.
 	players[0].global_position = Vector3(-15.0, 0.0, -35.0)
 	players[3].global_position = Vector3(0.0, 0.0, 5.0)
 	ball.global_position = Vector3(0.0, 0.0, 5.0)
-	# Without manual override, autoswitch would target player 3 immediately.
-	# Trigger a manual cycle (0 → 1 RB) and verify autoswitch is muted.
-	team_ctrl.cycle_active_outfield()
-	assert_eq(team_ctrl.active_index, 1, "Cycle moves active 0 → 1")
-	# Run autoswitch many frames — must NOT revert to 3 within the cooldown.
-	for _i in TeamController.MANUAL_OVERRIDE_FRAMES - 1:
+	team_ctrl.cycle_active_outfield()  # 0 → 1
+	assert_eq(team_ctrl.active_index, 1)
+	# Run far longer than MANUAL_OVERRIDE_FRAMES with ball static and
+	# active player not moving. Override must self-refresh.
+	for _i in TeamController.MANUAL_OVERRIDE_FRAMES * 3:
 		team_ctrl.step_autoswitch()
 	assert_eq(team_ctrl.active_index, 1,
-		"Autoswitch must stay muted during the manual-override cooldown")
-	# After the cooldown expires, autoswitch resumes — needs an additional
-	# SWITCH_HOLD_FRAMES ticks to commit the new target (player 3).
-	for _i in TeamController.SWITCH_HOLD_FRAMES + 1:
+		"Autoswitch must stay muted while ball is parked, regardless of duration")
+
+
+func test_manual_cycle_releases_override_when_ball_drifts() -> void:
+	# S06-D31 refresh condition (b) FAILS when ball drift > threshold.
+	# Cooldown then ticks down normally; after expiry + hold frames,
+	# autoswitch reverts to closest.
+	players[0].global_position = Vector3(-15.0, 0.0, -35.0)
+	players[3].global_position = Vector3(0.0, 0.0, 5.0)
+	ball.global_position = Vector3(0.0, 0.0, 5.0)
+	team_ctrl.cycle_active_outfield()  # 0 → 1
+	assert_eq(team_ctrl.active_index, 1)
+	# Move ball far away from anchor so drift > MANUAL_OVERRIDE_BALL_DRIFT_M.
+	ball.global_position = Vector3(50.0, 0.0, 5.0)
+	# Active player not moving — cooldown should now decrement.
+	for _i in TeamController.MANUAL_OVERRIDE_FRAMES + TeamController.SWITCH_HOLD_FRAMES + 1:
 		team_ctrl.step_autoswitch()
-	assert_eq(team_ctrl.active_index, 3,
-		"After cooldown + hold frames autoswitch reverts to closest (player 3)")
+	assert_ne(team_ctrl.active_index, 1,
+		"After ball drift > %.1f m and full cooldown, autoswitch must revert" %
+			TeamController.MANUAL_OVERRIDE_BALL_DRIFT_M)
+
+
+func test_manual_cycle_override_refreshes_while_active_moves() -> void:
+	# S06-D31 refresh condition (a): user driving the player keeps
+	# the override alive even if the ball drifts.
+	players[0].global_position = Vector3(-15.0, 0.0, -35.0)
+	players[3].global_position = Vector3(0.0, 0.0, 5.0)
+	ball.global_position = Vector3(0.0, 0.0, 5.0)
+	team_ctrl.cycle_active_outfield()  # 0 → 1
+	# Drift the ball (would normally let cooldown tick down) AND keep
+	# the active player moving every frame.
+	ball.global_position = Vector3(50.0, 0.0, 5.0)
+	for _i in TeamController.MANUAL_OVERRIDE_FRAMES * 2:
+		players[1].velocity = Vector3(5.0, 0.0, 0.0)
+		team_ctrl.step_autoswitch()
+	assert_eq(team_ctrl.active_index, 1,
+		"Autoswitch must stay muted while the user is actively driving the player")
 
 
 func test_cycle_active_outfield_skips_goalkeeper() -> void:

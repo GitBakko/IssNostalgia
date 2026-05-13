@@ -15,14 +15,19 @@ const SWITCH_THRESHOLD_M: float = 8.0     ## auto-switch distance gate
 const SWITCH_DEAD_ZONE_M: float = 0.5     ## hysteresis half-width (S06-D01)
 const SWITCH_HOLD_FRAMES: int = 3         ## minimum frames condition must
                                           ## stay true before commit (S06-D01)
-## Cooldown after a manual cycle during which step_autoswitch is muted.
-## Without this the autoswitch instantly reverts the manual choice when
-## the manually-picked player is far from the ball (the common case —
-## e.g. user cycles to a defender while the ball is at midfield).
-## 240 ticks @ 120 Hz = 2.0 s — long enough for the user to act on the
-## manual selection, short enough that autoswitch resumes naturally.
-## (S06-D31, added 2026-05-13 after T05 visual playtest.)
+## Base cooldown after a manual cycle during which step_autoswitch is
+## muted. 240 ticks @ 120 Hz = 2.0 s. Auto-refreshed each tick the
+## active player is moving (user-engaged) OR the ball hasn't drifted far
+## from where it sat at override time — so a parked player and a static
+## ball never lose the manual selection. (S06-D31)
 const MANUAL_OVERRIDE_FRAMES: int = 240
+## Velocity² threshold above which the active player counts as "in use".
+## 0.25 m²/s² → 0.5 m/s walking. Lower noise floor would refresh on
+## physics jitter alone.
+const MANUAL_OVERRIDE_VELOCITY_SQ: float = 0.25
+## Ball-drift radius (in metres) within which the ball is treated as
+## still on the same play — autoswitch stays muted. Squared in code.
+const MANUAL_OVERRIDE_BALL_DRIFT_M: float = 5.0
 
 # ---- Exports -------------------------------------------------------------
 ## Roster — 5 entries for a 2-1-1 + GK formation. Order matches the
@@ -56,6 +61,7 @@ var active_index: int = 0
 var _switch_pending_frames: int = 0
 var _switch_pending_target: int = -1
 var _manual_override_remaining: int = 0
+var _manual_override_ball_anchor: Vector3 = Vector3.ZERO
 var _indicators: Array[MeshInstance3D] = []
 
 
@@ -80,7 +86,7 @@ func cycle_active_outfield() -> void:
 		var candidate: int = (active_index + offset) % n
 		if not players[candidate].is_goalkeeper:
 			_commit_switch(candidate)
-			_manual_override_remaining = MANUAL_OVERRIDE_FRAMES
+			_arm_manual_override()
 			return
 
 
@@ -94,7 +100,7 @@ func set_active(new_index: int) -> void:
 	if players[new_index].is_goalkeeper:
 		return
 	_commit_switch(new_index)
-	_manual_override_remaining = MANUAL_OVERRIDE_FRAMES
+	_arm_manual_override()
 
 
 ## Pure-on-instance auto-switch step. Tests drive this with explicit
@@ -105,16 +111,29 @@ func step_autoswitch() -> void:
 	if controller == null or ball_ref == null or players.is_empty():
 		return
 
-	# S06-D31: a recent manual cycle/set_active mutes the autoswitch for
-	# MANUAL_OVERRIDE_FRAMES so the user's choice actually sticks long
-	# enough to be acted on.
+	var active_player: Player = players[active_index]
+
+	# S06-D31: manual override mutes autoswitch. Auto-refreshes while the
+	# user is actively driving the player OR the ball is essentially
+	# parked — a fixed timer would yank control on a 5-on-5 build-up
+	# whenever the player is briefly stationary. With both refresh
+	# conditions failing the cooldown ticks down normally.
 	if _manual_override_remaining > 0:
-		_manual_override_remaining -= 1
+		var v_sq: float = active_player.velocity.length_squared()
+		var ball_drift_sq: float = (
+			ball_ref.global_position - _manual_override_ball_anchor
+		).length_squared()
+		var refresh: bool = (
+			v_sq > MANUAL_OVERRIDE_VELOCITY_SQ
+			or ball_drift_sq < MANUAL_OVERRIDE_BALL_DRIFT_M * MANUAL_OVERRIDE_BALL_DRIFT_M
+		)
+		if refresh:
+			_manual_override_remaining = MANUAL_OVERRIDE_FRAMES
+		else:
+			_manual_override_remaining -= 1
 		_switch_pending_frames = 0
 		_switch_pending_target = -1
 		return
-
-	var active_player: Player = players[active_index]
 	var active_dist: float = _xz_dist(active_player.global_position, ball_ref.global_position)
 
 	# Hysteresis: only consider switching once we're CLEARLY outside the
@@ -163,6 +182,14 @@ func _physics_process(_delta: float) -> void:
 
 
 # ---- Internal -----------------------------------------------------------
+
+func _arm_manual_override() -> void:
+	_manual_override_remaining = MANUAL_OVERRIDE_FRAMES
+	if ball_ref != null:
+		_manual_override_ball_anchor = ball_ref.global_position
+	else:
+		_manual_override_ball_anchor = Vector3.ZERO
+
 
 func _commit_switch(new_index: int) -> void:
 	if new_index == active_index:
