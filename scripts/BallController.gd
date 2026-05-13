@@ -18,10 +18,23 @@ const PICKUP_RADIUS_SQ: float = PICKUP_RADIUS_M * PICKUP_RADIUS_M
 ## be cleanly picked up — 12 m/s matches the project spec.
 const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
-## Carry offset in player-local space. 0.5 m FORWARD (-Z, Godot model
-## convention), 0.7 m below the capsule centre so the ball sits at ~ankle
-## height (capsule is 1.8 m tall, centre at y=0.9). S07-D03 / R02-F06.
-const CARRY_OFFSET_LOCAL: Vector3 = Vector3(0.0, -0.7, -0.5)
+
+@export_group("Carry offset (S08-T01 / R02-F04)")
+## Carry offset along the player's local forward (-Z) at WALK speed.
+## EA Pitch Notes (R02-F04): elite players keep the ball closer when
+## walking, push it further when sprinting.
+@export var carry_offset_min_m: float = 0.3
+## Carry offset along the player's local forward (-Z) at SPRINT (and
+## above) speed. The actual offset is `lerp(min, max, speed/max_walk)`.
+@export var carry_offset_max_m: float = 0.5
+## Vertical offset from the capsule centre (always negative — capsule
+## centre sits at y≈0.9, ball-target lands at ankle height).
+@export var carry_offset_y_m: float = -0.7
+## Ratio applied to the carrier's velocity when emitting a TOUCH release
+## (S08-T02). Elite range from R02-F04 is 0.88-0.95; default 0.95.
+## Unused in T01; declared here so T02 can land without further export
+## reshuffling.
+@export var ball_speed_ratio_on_touch: float = 0.95
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -164,10 +177,14 @@ func _try_pickup() -> void:
 func _sync_carry_position() -> void:
 	if _carrier == null:
 		return
-	# Player-local carry offset → world. Use VisualRoot basis (S07-T06)
-	# so the ball follows the rendered mesh, not the (always-identity)
-	# collision capsule.
-	var world_offset: Vector3 = _carrier.get_visual_basis() * CARRY_OFFSET_LOCAL
+	# Speed-modulated forward offset (S08-D04 / R02-F04): walk → 0.3 m,
+	# sprint → 0.5 m. Linear in carrier_speed/max_walk_speed, clamped at
+	# the walk threshold so anything ≥ walk speed reads as "sprint" for
+	# the offset curve.
+	var offset_local: Vector3 = _compute_carry_offset_local(_carrier)
+	# Use VisualRoot basis (S07-T06) so the ball follows the rendered
+	# mesh, not the (always-identity) collision capsule.
+	var world_offset: Vector3 = _carrier.get_visual_basis() * offset_local
 	var target: Vector3 = _carrier.global_position + world_offset
 	# CRITICAL: while the ball is KINEMATIC-frozen, `_integrate_forces` does
 	# NOT run, so `teleport_to` (which stages _pending_teleport for the
@@ -175,6 +192,15 @@ func _sync_carry_position() -> void:
 	# direct `global_position` writes — we use those instead. The pending
 	# pipeline is only for unfrozen-launch flows.
 	ball.global_position = target
+
+
+## Player-local carry offset for the given carrier. Pure function — tests
+## drive it directly with explicit Player state.
+func _compute_carry_offset_local(carrier: Player) -> Vector3:
+	var max_walk: float = maxf(0.001, carrier.max_walk_speed)
+	var t: float = clampf(carrier.velocity.length() / max_walk, 0.0, 1.0)
+	var z_offset: float = -lerpf(carry_offset_min_m, carry_offset_max_m, t)
+	return Vector3(0.0, carry_offset_y_m, z_offset)
 
 
 func _assign_carrier(player: Player) -> void:

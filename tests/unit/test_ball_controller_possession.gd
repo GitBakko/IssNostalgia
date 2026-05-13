@@ -149,20 +149,45 @@ func test_human_team_wins_simultaneous_pickup() -> void:
 # ---- carry sync --------------------------------------------------------
 
 func test_carry_position_offset_in_front_of_player() -> void:
-	# Force possession, then step and check the ball lands at the
-	# expected world offset. The integrator is frozen during carry so
-	# BallController writes `global_position` directly (KINEMATIC freeze
-	# accepts direct writes; the staged-teleport pipeline only flushes
-	# when _integrate_forces runs, which it doesn't while frozen).
+	# Force possession at REST (velocity 0) → carry offset uses the
+	# walk-speed minimum (0.3 m). S08-D04: speed-modulated offset, NOT
+	# the Sprint 7 fixed 0.5 m. Direct global_position write (KINEMATIC
+	# freeze blocks the staged-teleport pipeline).
 	players_a[0].global_position = Vector3(0.0, 0.0, 0.0)
-	# Default basis: -Z is forward. CARRY_OFFSET_LOCAL = (0, -0.7, -0.5).
-	# After basis * offset, world offset = (0, -0.7, -0.5) — i.e. 0.5 m
-	# in front of the player and at ankle height.
+	players_a[0].velocity = Vector3.ZERO
 	bc._assign_carrier(players_a[0])
 	bc.step(0.0)
 	assert_eq(ball.global_position,
-		players_a[0].global_position + Vector3(0.0, -0.7, -0.5),
-		"Carry sync must place ball at player_pos + basis*CARRY_OFFSET_LOCAL")
+		players_a[0].global_position + Vector3(0.0, -0.7, -0.3),
+		"At rest the carry offset uses carry_offset_min_m (0.3 m)")
+
+
+# ---- S08-T01 carry-offset modulation -----------------------------------
+
+func test_carry_offset_modulates_with_speed() -> void:
+	# At HALF max_walk_speed the offset must sit halfway between min
+	# (0.3) and max (0.5) — i.e. 0.4 m forward.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed * 0.5)
+	bc._assign_carrier(p)
+	bc.step(0.0)
+	assert_almost_eq(ball.global_position.z, -0.4, 1.0e-3,
+		"Half-walk speed → carry z offset = -lerp(0.3, 0.5, 0.5) = -0.4")
+
+
+func test_carry_offset_clamped_at_walk_max() -> void:
+	# Sprint speed > max_walk → offset capped at carry_offset_max_m.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)  ## 8 m/s > 5.5
+	bc._assign_carrier(p)
+	bc.step(0.0)
+	assert_almost_eq(ball.global_position.z, -0.5, 1.0e-3,
+		"Sprint speed must clamp carry offset at carry_offset_max_m (0.5 m)")
+	# Y stays at ankle height regardless of speed.
+	assert_almost_eq(ball.global_position.y, -0.7, 1.0e-3,
+		"Y offset is speed-independent")
 
 
 # ---- release proxy ------------------------------------------------------
