@@ -119,7 +119,7 @@ func _spawn_ball_controllers() -> void:
 	ball_controller.ball = ball
 	var teams_arr: Array[TeamController] = [team_a_ctrl, team_b_ctrl]
 	ball_controller.teams = teams_arr
-	ball_controller.debug_log = true  ## T05 diagnostic — surfaces pickup attempts
+	ball_controller.debug_log = false  ## T05 diagnostic — flip true when re-debugging
 	add_child(ball_controller)
 	# 1 BallLauncher per match — used by PassingControllers to compute
 	# lob velocity via the iterative drag-aware solver.
@@ -143,14 +143,14 @@ func _spawn_team_shoot_pass(root: Node3D, tc: TeamController, label: String) -> 
 	sc.name = "ShootingController" + label
 	sc.team_controller = tc
 	sc.ball_controller = ball_controller
-	sc.debug_log = true  ## T05 diagnostic
+	sc.debug_log = false  ## T05 diagnostic — flip true when re-debugging
 	root.add_child(sc)
 	var pc: PassingController = PassingController.new()
 	pc.name = "PassingController" + label
 	pc.team_controller = tc
 	pc.ball_controller = ball_controller
 	pc.ball_launcher = ball_launcher
-	pc.debug_log = true  ## T05 diagnostic
+	pc.debug_log = false  ## T05 diagnostic — flip true when re-debugging
 	root.add_child(pc)
 	return {"shoot": sc, "pass_": pc}
 
