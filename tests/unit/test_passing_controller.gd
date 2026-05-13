@@ -233,6 +233,29 @@ func test_pass_arms_facing_warp_on_target_receiver() -> void:
 		"Receiver must end up facing toward the passer (+Z here)")
 
 
+func test_pass_switches_active_to_receiver_after_anim_ends() -> void:
+	# Glitch from playtest: after pass-fire, manual_override on the
+	# passer kept the user stuck on the passer for ~2 s while the ball
+	# was already at the receiver. Fix: PassingController explicitly
+	# switches the team's active player to the target receiver when
+	# the pass-anim window expires.
+	var active: Player = players_a[0]
+	active.global_position = Vector3.ZERO
+	players_a[1].global_position = Vector3(0.0, 0.0, -10.0)
+	for i in [2, 3, 4]:
+		players_a[i].global_position = Vector3(0.0, 0.0, +50.0)
+	# Sanity — controller starts on players_a[0].
+	assert_eq(team_a.active_index, 0)
+	pc.try_pass()
+	# Drain the pass-anim window (default 100 ms). 18 ticks ≈ 150 ms.
+	for _i in 18:
+		pc._physics_process(1.0 / 120.0)
+	assert_eq(team_a.active_index, 1,
+		"After pass-anim ends, active must switch to the target receiver")
+	assert_eq(controller_a.player, players_a[1],
+		"PlayerController must be re-pointed at the new active")
+
+
 func test_pass_does_not_warp_anyone_on_fallback() -> void:
 	# No teammate in cone → fallback pass to "10 m forward". No specific
 	# receiver, so no facing warp on any teammate.

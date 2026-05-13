@@ -63,6 +63,13 @@ signal pass_fired(target_position: Vector3, distance: float, target_player: Play
 
 # ---- Runtime state -------------------------------------------------------
 var _pass_anim_remaining_s: float = 0.0
+## Target teammate captured at pass-fire. When the pass-anim window
+## ends the TeamController is told to make this player active — gives
+## the user immediate command of the receiver instead of waiting for
+## the ball-proximity autoswitch to drain past the manual_override
+## cooldown (which can leave them stuck on the passer for ~2 s).
+## Cleared on switch / fallback pass / null-target pass.
+var _pending_switch_target: Player = null
 
 
 # ---- Public API ----------------------------------------------------------
@@ -112,6 +119,13 @@ func try_pass() -> bool:
 	if target_player != null and target_player != active:
 		var to_passer: Vector3 = active.global_position - target_player.global_position
 		target_player.start_facing_warp(to_passer, receiver_prewarp_duration_s)
+		# Queue the active-player switch for when the pass-anim window
+		# ends. Without this the manual_override cooldown on the passer
+		# can keep the user stuck on the wrong player while the ball
+		# flies — see _physics_process below.
+		_pending_switch_target = target_player
+	else:
+		_pending_switch_target = null
 
 	# Pass-anim auto-switch gate (S06 spec A2)
 	_pass_anim_remaining_s = pass_anim_duration_s
@@ -187,6 +201,14 @@ func _physics_process(delta: float) -> void:
 			var p: Player = _active_player()
 			if p != null and p.state == Player.State.PASSING:
 				p.state = Player.State.IDLE
+			# Hand control to the targeted receiver, deterministically.
+			# set_active also re-arms manual_override on the new active so
+			# the autoswitch doesn't immediately yank control elsewhere.
+			if _pending_switch_target != null:
+				var idx: int = team_controller.players.find(_pending_switch_target)
+				if idx >= 0:
+					team_controller.set_active(idx)
+				_pending_switch_target = null
 	# Trigger on a buffered E press from the team's controller.
 	if team_controller.controller == null:
 		return
