@@ -134,6 +134,25 @@ func test_update_facing_rotates_basis_toward_target() -> void:
 
 # ---- team-colour application ----------------------------------------------
 
+func test_player_decelerates_when_left_undriven() -> void:
+	# S06-D32: an inactive player (no apply_movement_step calls from any
+	# controller) must NOT coast on its last velocity — Player._physics_process
+	# applies a zero-drive step automatically.
+	# Simulate a sprint to full speed first.
+	for _i in 60:
+		player.apply_movement_step(Vector3(0.0, 0.0, -1.0), true, SUB_DT)
+	assert_almost_eq(player.velocity.length(), player.max_sprint_speed, 1.0e-2,
+		"Player must reach sprint speed before release test")
+	# Now stop driving — _physics_process should auto-apply zero input.
+	# We can't easily await physics ticks in GUT; emulate by directly calling
+	# the same fallback path (zero input) for many ticks.
+	for _i in 120:
+		player.apply_movement_step(Vector3.ZERO, false, SUB_DT)
+	assert_lt(player.velocity.length(), 0.5,
+		"Released player should be near-stationary after ~1 s of decel, got %.3f" %
+			player.velocity.length())
+
+
 func test_team_colour_applied_to_body_mesh() -> void:
 	var body: MeshInstance3D = player.get_node("BodyMesh") as MeshInstance3D
 	assert_not_null(body)

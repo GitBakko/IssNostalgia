@@ -63,6 +63,11 @@ var stamina: float = STAMINA_FULL
 var _facing_target: Vector3 = Vector3.FORWARD
 var _body_mesh: MeshInstance3D
 var _front_marker: MeshInstance3D
+## Set true by `apply_movement_step()`; consumed (and reset) at the end of
+## `_physics_process`. When false we auto-apply a zero-input drive step so
+## an inactive player decelerates to a stop instead of coasting on its
+## last-active velocity. (S06-D32, found during T05 Q-switch playtest.)
+var _driven_this_tick: bool = false
 
 
 func _ready() -> void:
@@ -81,6 +86,7 @@ func _ready() -> void:
 ## sprint flag. Tests drive this directly with explicit `dt` — no scene
 ## tick coupling.
 func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> void:
+	_driven_this_tick = true
 	# 1) stamina (S06-D04 gate: recovery happens ONLY when sprint released)
 	if sprint_held and stamina > STAMINA_EMPTY:
 		stamina = maxf(STAMINA_EMPTY, stamina - STAMINA_DRAIN_PER_SEC * dt)
@@ -141,8 +147,17 @@ func is_busy_with_ball_action() -> bool:
 # ---- Lifecycle ----------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	# If no controller drove us this tick (we're inactive — TeamController
+	# pointed elsewhere, or StaticAI hasn't woken up yet), apply a
+	# zero-input step so velocity decays naturally toward 0 instead of
+	# coasting forever. Active players are driven by their PlayerController
+	# AFTER this — but the controller's call sets _driven_this_tick = true
+	# next tick, so the active player skips this branch from then on.
+	if not _driven_this_tick:
+		apply_movement_step(Vector3.ZERO, false, delta)
 	update_facing(delta)
 	move_and_slide()
+	_driven_this_tick = false
 
 
 # ---- Internal -----------------------------------------------------------
