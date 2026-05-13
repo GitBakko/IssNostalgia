@@ -128,6 +128,30 @@ func test_autoswitch_resets_hold_when_target_changes() -> void:
 
 # ---- manual cycle Q -------------------------------------------------------
 
+func test_manual_cycle_mutes_autoswitch_for_cooldown_window() -> void:
+	# S06-D31: a manual cycle/set_active should suspend autoswitch for
+	# MANUAL_OVERRIDE_FRAMES so the user's choice actually sticks.
+	# Setup: ball near player[3] (F at +5,0,5); active = 0 (LB at -15,0,-35).
+	players[0].global_position = Vector3(-15.0, 0.0, -35.0)
+	players[3].global_position = Vector3(0.0, 0.0, 5.0)
+	ball.global_position = Vector3(0.0, 0.0, 5.0)
+	# Without manual override, autoswitch would target player 3 immediately.
+	# Trigger a manual cycle (0 → 1 RB) and verify autoswitch is muted.
+	team_ctrl.cycle_active_outfield()
+	assert_eq(team_ctrl.active_index, 1, "Cycle moves active 0 → 1")
+	# Run autoswitch many frames — must NOT revert to 3 within the cooldown.
+	for _i in TeamController.MANUAL_OVERRIDE_FRAMES - 1:
+		team_ctrl.step_autoswitch()
+	assert_eq(team_ctrl.active_index, 1,
+		"Autoswitch must stay muted during the manual-override cooldown")
+	# After the cooldown expires, autoswitch resumes — needs an additional
+	# SWITCH_HOLD_FRAMES ticks to commit the new target (player 3).
+	for _i in TeamController.SWITCH_HOLD_FRAMES + 1:
+		team_ctrl.step_autoswitch()
+	assert_eq(team_ctrl.active_index, 3,
+		"After cooldown + hold frames autoswitch reverts to closest (player 3)")
+
+
 func test_cycle_active_outfield_skips_goalkeeper() -> void:
 	# Default active index = 0 (DEF_LEFT). Cycle should hit 1, 2, 3, then
 	# wrap back to 0 — never 4 (GK).

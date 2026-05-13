@@ -15,6 +15,14 @@ const SWITCH_THRESHOLD_M: float = 8.0     ## auto-switch distance gate
 const SWITCH_DEAD_ZONE_M: float = 0.5     ## hysteresis half-width (S06-D01)
 const SWITCH_HOLD_FRAMES: int = 3         ## minimum frames condition must
                                           ## stay true before commit (S06-D01)
+## Cooldown after a manual cycle during which step_autoswitch is muted.
+## Without this the autoswitch instantly reverts the manual choice when
+## the manually-picked player is far from the ball (the common case —
+## e.g. user cycles to a defender while the ball is at midfield).
+## 240 ticks @ 120 Hz = 2.0 s — long enough for the user to act on the
+## manual selection, short enough that autoswitch resumes naturally.
+## (S06-D31, added 2026-05-13 after T05 visual playtest.)
+const MANUAL_OVERRIDE_FRAMES: int = 240
 
 # ---- Exports -------------------------------------------------------------
 ## Roster — 5 entries for a 2-1-1 + GK formation. Order matches the
@@ -47,6 +55,7 @@ const INDICATOR_Y_OFFSET: float = 0.011   ## just above the pitch plane
 var active_index: int = 0
 var _switch_pending_frames: int = 0
 var _switch_pending_target: int = -1
+var _manual_override_remaining: int = 0
 var _indicators: Array[MeshInstance3D] = []
 
 
@@ -67,30 +76,25 @@ func cycle_active_outfield() -> void:
 	if players.is_empty():
 		return
 	var n: int = players.size()
-	# Diagnostic dump on first call to see what flags actually look like.
-	print("[TeamCtrl cycle] active_index=%d, n=%d" % [active_index, n])
-	for i in range(n):
-		print("  players[%d] = %s, is_goalkeeper=%s" % [
-			i, players[i].name, players[i].is_goalkeeper])
 	for offset in range(1, n + 1):
 		var candidate: int = (active_index + offset) % n
-		print("  try offset=%d candidate=%d (%s) gk=%s" % [
-			offset, candidate, players[candidate].name,
-			players[candidate].is_goalkeeper])
 		if not players[candidate].is_goalkeeper:
 			_commit_switch(candidate)
+			_manual_override_remaining = MANUAL_OVERRIDE_FRAMES
 			return
 
 
 ## Force-set the active player by index. Out-of-range indices and GK
 ## indices are no-ops. Used by tests / level scripts to set the initial
-## active player from outside.
+## active player from outside. Also arms the manual-override cooldown so
+## the autoswitch doesn't immediately revert the assignment.
 func set_active(new_index: int) -> void:
 	if new_index < 0 or new_index >= players.size():
 		return
 	if players[new_index].is_goalkeeper:
 		return
 	_commit_switch(new_index)
+	_manual_override_remaining = MANUAL_OVERRIDE_FRAMES
 
 
 ## Pure-on-instance auto-switch step. Tests drive this with explicit
@@ -99,6 +103,15 @@ func step_autoswitch() -> void:
 	if not is_human:
 		return
 	if controller == null or ball_ref == null or players.is_empty():
+		return
+
+	# S06-D31: a recent manual cycle/set_active mutes the autoswitch for
+	# MANUAL_OVERRIDE_FRAMES so the user's choice actually sticks long
+	# enough to be acted on.
+	if _manual_override_remaining > 0:
+		_manual_override_remaining -= 1
+		_switch_pending_frames = 0
+		_switch_pending_target = -1
 		return
 
 	var active_player: Player = players[active_index]
@@ -145,14 +158,7 @@ func _physics_process(_delta: float) -> void:
 	if not is_human:
 		return
 	if controller != null and controller.consume_buffered(&"switch_player"):
-		print("[TeamCtrl %s] manual switch consumed; cycling outfield" % (
-			team_config.team_name if team_config else "?"))
 		cycle_active_outfield()
-		print("[TeamCtrl %s] new active_index = %d (player %s)" % [
-			team_config.team_name if team_config else "?",
-			active_index,
-			players[active_index].name if active_index < players.size() else "?",
-		])
 	step_autoswitch()
 
 

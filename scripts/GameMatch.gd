@@ -140,7 +140,3 @@ func _print_setup_summary() -> void:
 		mock_ball.global_position if mock_ball else Vector3.INF,
 		both_human,
 	])
-	# InputMap diagnostic — confirms project.godot actions are registered.
-	for suffix in PlayerController.ACTION_SUFFIXES:
-		var full: StringName = StringName("p1_" + String(suffix))
-		print("[GameMatch] InputMap.has_action(%s) = %s" % [full, InputMap.has_action(full)])

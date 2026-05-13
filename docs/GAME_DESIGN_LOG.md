@@ -42,6 +42,7 @@ Format: append-only. Riferimenti a finding di `RESEARCH_INDEX.md` come `RXX-FYY`
 | S06-D28 | **Pass spin auto**: backspin `-3 rad/s` su grounder (`dist < 8 m`), topspin `+4 rad/s` su lob (`dist > 15 m`), zero in mezzo | Da R03-F05. Riusa `BallLauncher.compose_spin()`. |
 | S06-D29 | **MatchManager.both_human: bool** flag debug (NON nel contract ufficiale) per testing locale 1v1 input keyboard / split-screen futuro | Utile per debug autoswitch e formation transition senza opponent AI. |
 | S06-D30 | **Animazione tiro placeholder durata = 200 ms; passaggio = 100 ms**. Auto-switch bloccato durante questi intervalli. | Dura abbastanza per leggere il contesto, abbastanza poco da non frustrare. |
+| S06-D31 | **Manual-override cooldown** = 240 physics frame (2.0 s @ 120 Hz) post-cycle. `step_autoswitch` muto per tutta la durata. | Senza cooldown il manual cycle perde sempre la guerra contro l'auto-switch quando il giocatore manualmente scelto è lontano dalla palla (caso più comune). 2 s = abbastanza per agire sul giocatore selezionato, abbastanza breve per non sembrare bloccato. Aggiunto dopo T05 visual playtest dove Q non aveva effetto visibile. |
 
 ---
 
