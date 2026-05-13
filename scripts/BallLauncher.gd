@@ -209,9 +209,9 @@ func launch_to_point(target_xz: Vector3, _speed_unused: float = -1.0,
 		return
 	var dir: Vector3 = horizontal / dist
 	# Arc height: scaled to make medium / long lobs look like real
-	# football crosses — apex 8-12 m, not a flat laser pass. A "low
+	# football crosses — apex ~6-10 m, not a flat laser pass. A "low
 	# pinpoint" pass is a separate skill (deferred to Phase 2 controls).
-	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.40, 1.5, 12.0)
+	var h: float = arc_height_override if arc_height_override > 0.0 else clampf(dist * 0.32, 1.2, 9.6)
 	var v_vertical: float = sqrt(2.0 * 9.81 * h)
 	var t_flight: float = 2.0 * v_vertical / 9.81
 	var v_horizontal: float = dist / t_flight   # vacuum guess
