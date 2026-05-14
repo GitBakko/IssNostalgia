@@ -278,12 +278,15 @@ func test_dribble_impulse_fires_at_walk_interval() -> void:
 		"Dribble impulse must NOT release the carrier")
 	assert_not_null(ball._pending_linear,
 		"Touch interval crossed → impulse staged via apply_launch_state")
-	var expected_speed: float = p.velocity.length() * bc.touch_velocity_factor
+	# Peak kick velocity = carrier_speed * lead + drag * interval / 2.
+	var expected_speed: float = (
+		p.velocity.length() * bc.ball_avg_lead_factor
+		+ bc.drag_compensation_m_s2 * bc.touch_interval_walk_s * 0.5
+	)
 	var pending: Vector3 = ball._pending_linear as Vector3
-	# XZ planar component matches carrier direction × factor.
 	var planar_speed: float = Vector2(pending.x, pending.z).length()
 	assert_almost_eq(planar_speed, expected_speed, 1.0e-2,
-		"Impulse XZ speed = carrier_speed * touch_velocity_factor")
+		"Impulse XZ speed must equal lead*carrier + drag*interval/2 (formula)")
 
 
 func test_dribble_impulse_uses_sprint_cadence_above_walk() -> void:
@@ -505,9 +508,15 @@ func test_pickup_primes_ball_when_carrier_already_moving() -> void:
 		"Pickup with moving carrier must prime the ball velocity")
 	var pending: Vector3 = ball._pending_linear as Vector3
 	var planar_speed: float = Vector2(pending.x, pending.z).length()
-	var expected: float = p.velocity.length() * bc.touch_velocity_factor
+	# Sprint regime → uses sprint interval for drag compensation.
+	var interval: float = bc.touch_interval_sprint_s if p.velocity.length() > p.max_walk_speed \
+		else bc.touch_interval_walk_s
+	var expected: float = (
+		p.velocity.length() * bc.ball_avg_lead_factor
+		+ bc.drag_compensation_m_s2 * interval * 0.5
+	)
 	assert_almost_eq(planar_speed, expected, 1.0e-2,
-		"Prime impulse XZ speed = carrier_speed * touch_velocity_factor")
+		"Prime impulse must follow the same drag-compensated formula")
 
 
 func test_shoot_release_still_arms_lockout() -> void:

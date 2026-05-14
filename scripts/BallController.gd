@@ -51,11 +51,19 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## carrier is essentially still — let drag + rolling friction stop the
 ## ball naturally near the player.
 @export var touch_min_speed_m_s: float = 1.0
-## Boost factor applied to carrier velocity when kicking the ball.
-## 1.10 = ball leaves only 10 % faster than carrier — ball drifts
-## ahead gently and drag brings it back into reach. Higher values
-## launch the ball too far for the carrier to keep control.
-@export var touch_velocity_factor: float = 1.10
+## Desired AVERAGE ball speed over a kick interval, as multiple of
+## carrier speed. 1.10 = ball runs 10 % faster than carrier on
+## average → ball drifts ahead by carrier_speed × 0.10 × interval per
+## cycle. The peak kick velocity is computed to compensate for drag so
+## the AVERAGE matches — without this the kick velocity bleeds away
+## under drag and ball ends up BEHIND the carrier after 3-4 cycles
+## (playtest 2026-05-14). This is semantically clearer than a raw
+## peak factor.
+@export var ball_avg_lead_factor: float = 1.10
+## Estimated ball deceleration during a kick interval (rolling friction
+## + air drag, averaged). Used to derive the peak kick velocity from
+## the desired average. Tune up if ball still lags, down if it overshoots.
+@export var drag_compensation_m_s2: float = 5.0
 ## CONTROL RADIUS — the ball is only kicked when this close to the
 ## carrier. Outside this radius (but still inside loss_threshold)
 ## the ball coasts freely under drag + friction; the carrier has to
@@ -257,18 +265,32 @@ func _tick_dribble_impulses(delta: float) -> void:
 	_apply_touch_impulse(carrier_v)
 
 
-## Set ball linear velocity to `carrier_v * touch_velocity_factor` on
-## the XZ plane via the BallPhysics pending pipeline. Ball stays live —
-## no freeze, no carrier flag changes.
+## Set ball linear velocity in the carrier's direction at a peak speed
+## that compensates for drag, so the AVERAGE speed over the upcoming
+## interval equals `carrier_speed * ball_avg_lead_factor`. Without
+## this compensation, drag bleeds the kick velocity below the
+## carrier's average over the cycle and the ball drifts BEHIND the
+## carrier after a few touches.
+##
+##   peak = carrier_speed * lead + drag * interval * 0.5
+##   integrated over interval, average = peak - drag * interval * 0.5
+##                                     = carrier_speed * lead     ✓
 func _apply_touch_impulse(carrier_v: Vector3) -> void:
 	var planar: Vector3 = Vector3(carrier_v.x, 0.0, carrier_v.z)
-	var target: Vector3 = planar * touch_velocity_factor
-	# Preserve current Y velocity (e.g. a small bounce mid-roll) — only
-	# overwrite XZ. We do this by reading the live velocity and patching
-	# the X/Z components.
-	var live: Vector3 = ball.linear_velocity
-	target.y = live.y
-	ball.apply_launch_state(target)
+	var carrier_speed: float = planar.length()
+	if carrier_speed < 0.001:
+		return
+	var carrier_dir: Vector3 = planar / carrier_speed
+	# Pick the interval matching current speed regime.
+	var interval: float = touch_interval_walk_s
+	if _carrier != null and carrier_speed > _carrier.max_walk_speed:
+		interval = touch_interval_sprint_s
+	var desired_avg: float = carrier_speed * ball_avg_lead_factor
+	var peak: float = desired_avg + drag_compensation_m_s2 * interval * 0.5
+	var new_v_xz: Vector3 = carrier_dir * peak
+	# Preserve Y component (mid-bounce, etc.).
+	new_v_xz.y = ball.linear_velocity.y
+	ball.apply_launch_state(new_v_xz)
 
 
 # ---- Lifecycle -----------------------------------------------------------
