@@ -351,6 +351,62 @@ func test_ball_collision_active_during_possession() -> void:
 		"collision_mask must be preserved during possession")
 
 
+func test_carrier_added_to_collision_exception_on_pickup() -> void:
+	# Carrier must be in the ball's collision exception list — without
+	# this the CharacterBody3D capsule blocks at 0.51 m from the ball,
+	# the carrier's velocity drops to ~0, the dribble impulse never
+	# fires, and the ball ends up an unmovable boulder (regression
+	# observed 2026-05-13). Other players stay solid against the ball.
+	bc._assign_carrier(players_a[0])
+	var exceptions: Array[PhysicsBody3D] = ball.get_collision_exceptions()
+	assert_true(players_a[0] in exceptions,
+		"Carrier must be in ball.get_collision_exceptions() during possession")
+	# Other team players are NOT in the exception list.
+	for i in [1, 2, 3, 4]:
+		assert_false(players_a[i] in exceptions,
+			"Non-carrier teammates must remain solid against the ball")
+
+
+func test_collision_exception_cleared_on_release() -> void:
+	bc._assign_carrier(players_a[0])
+	bc.request_release(Vector3(8.0, 0.0, 0.0))
+	var exceptions: Array[PhysicsBody3D] = ball.get_collision_exceptions()
+	assert_false(players_a[0] in exceptions,
+		"Release must remove the carrier from the exception list")
+
+
+func test_collision_exception_cleared_on_loss() -> void:
+	bc._assign_carrier(players_a[0])
+	# Drift the ball outside loss_threshold_m → carrier auto-cleared.
+	ball.global_position = Vector3(0.0, 0.11, -(bc.loss_threshold_m + 0.1))
+	bc.step(0.0)
+	assert_null(bc.get_carrier(), "Sanity: loss fired")
+	var exceptions: Array[PhysicsBody3D] = ball.get_collision_exceptions()
+	assert_false(players_a[0] in exceptions,
+		"Loss must remove the carrier from the exception list")
+
+
+func test_pickup_primes_ball_when_carrier_already_moving() -> void:
+	# Player approaches a still ball at sprint speed. On pickup the
+	# ball must immediately match the carrier's velocity (× factor),
+	# otherwise the carrier walks PAST the ball before the first
+	# scheduled touch impulse and the loss-threshold gate trips.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	ball.global_position = Vector3(0.0, 0.11, 0.0)
+	ball._pending_linear = null
+	bc._assign_carrier(p)
+	# A prime impulse must have staged the carrier-velocity * factor.
+	assert_not_null(ball._pending_linear,
+		"Pickup with moving carrier must prime the ball velocity")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	var planar_speed: float = Vector2(pending.x, pending.z).length()
+	var expected: float = p.velocity.length() * bc.touch_velocity_factor
+	assert_almost_eq(planar_speed, expected, 1.0e-2,
+		"Prime impulse XZ speed = carrier_speed * touch_velocity_factor")
+
+
 func test_shoot_release_still_arms_lockout() -> void:
 	# Sanity: SHOOT release path keeps the Sprint 7 lockout behaviour.
 	bc._assign_carrier(players_a[0])

@@ -88,6 +88,10 @@ var _ordered_teams: Array[TeamController] = []
 var _last_log_pickup_dist_sq: float = INF
 var _pickup_lockout_remaining_s: float = 0.0
 var _touch_timer_s: float = 0.0
+## Player currently in the ball's collision-exception list (the only
+## one that can "walk through" the ball). Tracked here so we can
+## remove the exception cleanly on release / loss.
+var _exception_carrier: Node = null
 
 
 func _ready() -> void:
@@ -117,6 +121,7 @@ func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
 			ReleaseKind.keys()[kind], _carrier.name, velocity.length(), angular.length(),
 		])
 	_clear_carrier_flag()
+	_clear_collision_exception()
 	_carrier = null
 	_pickup_lockout_remaining_s = post_release_lockout_s
 	_touch_timer_s = 0.0
@@ -153,6 +158,7 @@ func _check_loss() -> bool:
 				_carrier.name, sqrt(dx * dx + dz * dz),
 			])
 		_clear_carrier_flag()
+		_clear_collision_exception()
 		_carrier = null
 		_touch_timer_s = 0.0
 		return true
@@ -269,6 +275,7 @@ func _try_pickup() -> void:
 func _assign_carrier(player: Player) -> void:
 	if _carrier != null:
 		_clear_carrier_flag()
+	_clear_collision_exception()
 	_carrier = player
 	_carrier.has_ball = true
 	# Reception facing warp (R09-F04): orient the receiver TOWARD the
@@ -288,6 +295,30 @@ func _assign_carrier(player: Player) -> void:
 		if ball_vel.dot(to_player) > 0.0:
 			player.start_facing_warp(-ball_vel)
 	ball.set_possessed(player)
+	# Add a collision exception so the carrier can walk THROUGH the
+	# ball — without this the CharacterBody3D capsule (radius 0.4)
+	# blocks at 0.51 m from the ball centre, the carrier's velocity
+	# drops to ~0, the dribble impulse never fires (touch_min_speed
+	# gate), and the ball ends up an unmovable boulder. Other players
+	# stay solid against the ball — only THIS carrier passes through.
+	ball.add_collision_exception_with(player)
+	_exception_carrier = player
+	# Prime the ball with a touch impulse RIGHT NOW if the carrier is
+	# already moving — so the ball matches their velocity from frame 1
+	# (no loss-threshold trigger from a player running over a still
+	# ball). _touch_timer_s starts at 0 so the next periodic touch
+	# fires after the full interval.
+	if player.velocity.length() > touch_min_speed_m_s:
+		_apply_touch_impulse(player.velocity)
+		_touch_timer_s = 0.0
+
+
+func _clear_collision_exception() -> void:
+	if ball == null or _exception_carrier == null:
+		return
+	if is_instance_valid(_exception_carrier):
+		ball.remove_collision_exception_with(_exception_carrier)
+	_exception_carrier = null
 
 
 func _clear_carrier_flag() -> void:
