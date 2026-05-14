@@ -92,6 +92,8 @@ var team_a_passer: PassingController
 var team_b_shooter: ShootingController  ## non-null only when both_human
 var team_b_passer: PassingController
 var team_b_static_ai: StaticAI  ## non-null only when both_human == false
+var team_a_goalkeeper: Goalkeeper  ## defends -Z goal
+var team_b_goalkeeper: Goalkeeper  ## defends +Z goal
 var players_a: Array[Player] = []
 var players_b: Array[Player] = []
 
@@ -140,6 +142,7 @@ func _spawn_team_a() -> void:
 	team_a_ctrl.ball_ref = ball
 	team_a_ctrl.is_human = true
 	team_a_root.add_child(team_a_ctrl)
+	team_a_goalkeeper = _spawn_goalkeeper(players_a, team_a_root, -52.5, "A")
 
 
 func _spawn_team_b() -> void:
@@ -171,6 +174,26 @@ func _spawn_team_b() -> void:
 		team_b_static_ai.formation = formation
 		team_b_static_ai.mirror_anchors = true
 		team_b_root.add_child(team_b_static_ai)
+	team_b_goalkeeper = _spawn_goalkeeper(players_b, team_b_root, 52.5, "B")
+
+
+func _spawn_goalkeeper(team_players: Array[Player], root: Node3D,
+		own_goal_z: float, label: String) -> Goalkeeper:
+	# Find the GK (formation marks the role; conventionally last entry).
+	var gk_player: Player = null
+	for p in team_players:
+		if p != null and p.is_goalkeeper:
+			gk_player = p
+			break
+	if gk_player == null:
+		return null
+	var gk: Goalkeeper = Goalkeeper.new()
+	gk.name = "Goalkeeper" + label
+	gk.goalkeeper = gk_player
+	gk.ball = ball
+	gk.goal_z = own_goal_z
+	root.add_child(gk)
+	return gk
 
 
 func _spawn_ball_controllers() -> void:

@@ -160,8 +160,12 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | R05-F06 max_reposition_speed cap 6–10 m/s by role | `StaticAI.max_reposition_speed_*` + `Player.set_static_target(pos, max_speed)` clamp | APPLIED T04 |
 | R05-F07 Temporal Voronoi (KNN 3-param) | DEFERRED → Phase 3 (per-frame cost incompatible with mobile budget) | DEFERRED |
 | R05 event-driven half-change trigger (F03 hybrid extra) | DEFERRED → Sprint 9 (T04 uses pure 2 Hz polling per spec — half-change event is an additive enhancement, plan didn't mandate) | DEFERRED |
-| R04-F01/F02/F04/F05/F06 GK reactive save + give-up gate | _TBD T05_ | _PENDING_ |
-| R04-F03 reaction delay | DEFERRED → Phase 3 | DEFERRED |
+| R04-F01 reachability two-gate (t_av, d_eff) | `Goalkeeper.compute_save_decision` | APPLIED T05 |
+| R04-F02 commit-early teleport-on-trajectory | `Goalkeeper._perform_snap` | APPLIED T05 |
+| R04-F03 controlled-hesitation reaction delay | DEFERRED → Phase 3 (Phase 2 teleport is intentional visible cheat) | DEFERRED |
+| R04-F04 1-axis intercept formula | `Goalkeeper.compute_save_decision` (kinematic, drag skipped per F04 sufficiency note) | APPLIED T05 |
+| R04-F05 idle position = ball_x * 0.5 angle bisect | `Goalkeeper._perform_idle` | APPLIED T05 |
+| R04-F06 give-up gate (post + crossbar) | `Goalkeeper.compute_save_decision` (idle on `abs(intercept_x) > goal_half_width_m` OR `predicted_height > crossbar_height_m`) | APPLIED T05 |
 | R09-F02 NBA Jam catch-up boost (schema-only) | _TBD T06_ | _PENDING_ |
 
 ### Sprint 08 — Calibration Sessions

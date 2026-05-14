@@ -22,6 +22,11 @@ enum State {
 	# TeamController can read them safely without checking for `null`.
 	SHOOTING,
 	PASSING,
+	# Sprint 8 T05 — driven by Goalkeeper.gd on a teleport-save event.
+	# is_busy_with_ball_action() does NOT block on SAVING (the GK can
+	# still receive the next-tick ball reposition); it's animation /
+	# HUD state only.
+	SAVING,
 }
 
 # ---- Tunables ------------------------------------------------------------
@@ -270,6 +275,16 @@ func on_possession_lost() -> void:
 	_input_buffer_active = false
 	_input_buffer_remaining_s = 0.0
 	_ball_moving_with_me = false
+
+
+## S08-T05 — mark this player as driven externally for the current
+## physics tick. Used by Goalkeeper.gd which sets `global_position`
+## directly (teleport-on-trajectory) and doesn't want
+## `_physics_process` to overwrite state with the auto zero-input
+## decel branch. NO state side effects — only flips the
+## "controller drove me" flag.
+func mark_driven() -> void:
+	_driven_this_tick = true
 
 
 ## S08-T04 — assign a world-space target position the player should
