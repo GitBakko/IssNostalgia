@@ -102,6 +102,26 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## complete planar stop (avoids endless tiny crawls).
 @export var brake_snap_threshold_m_s: float = 0.4
 
+@export_group("Turn-glue (ball rotates with carrier on direction change)")
+## Master switch. The ONLY moment the ball is "glued" to the foot —
+## while the carrier is rotating their carry direction. Outside of
+## active turning, normal kick / centering / drag physics apply.
+@export var turn_glue_enabled: bool = true
+## Maximum ball-to-carrier distance for the rotation snap. Beyond
+## this the ball is too loose to be considered "at the foot" and
+## the kick / centering / loss path takes over instead.
+@export var turn_glue_radius_m: float = 1.0
+## Minimum per-tick direction change (deg) before the rotation
+## snaps. Below this the carry direction is essentially steady;
+## ignoring tiny jitters keeps centered-carry coasting smooth.
+@export var turn_glue_min_angle_deg: float = 1.0
+## Per-tick rotation cap (deg). Limits how much of the carrier's
+## direction change is consumed by the glue in a single physics
+## tick — large turns are smoothed across multiple ticks instead
+## of teleporting the ball in one frame. 12° at 120 Hz = ~1440°/s
+## which still tracks any realistic player turn rate.
+@export var turn_glue_max_angle_per_tick_deg: float = 12.0
+
 @export_group("Magnetic centering (R02-F03 PhysicsFC carry-zone)")
 ## Master switch. When false, the ball coasts purely under physics
 ## between kicks (the original Architecture-B feel).
@@ -162,6 +182,9 @@ var _pickup_lockout_remaining_s: float = 0.0
 var _kick_lockout_remaining_s: float = 0.0
 ## Direction of the previous kick — used to detect turn for #4 dampen.
 var _last_kick_direction: Vector3 = Vector3.ZERO
+## Last carry direction (visual+velocity blend) for turn-glue rotation
+## detection. Cleared on possession change.
+var _last_carry_dir: Vector3 = Vector3.ZERO
 
 ## Emitted whenever a touch (proximity kick) fires. Carrier listens to
 ## flush its direction-input buffer (S08 dribble-buffer system).
@@ -280,7 +303,14 @@ func _tick_dribble_impulses(delta: float) -> void:
 		# Carrier essentially stopped: passive-brake the ball if it's
 		# still rolling within trap range so it doesn't drift away.
 		_apply_passive_brake(delta)
+		_last_carry_dir = Vector3.ZERO  ## reset turn-glue baseline
 		return
+	# Turn-glue first: if the carrier rotated their carry direction
+	# this tick AND the ball is at the foot, rotate the ball position
+	# + velocity by the same delta around the carrier. This is the
+	# ONE moment the ball is glued — eliminates the trail / snap-back
+	# during direction changes (per playtest 2026-05-14).
+	_apply_turn_glue(carrier_v, carrier_speed)
 	# Geometric trigger: carrier body reached the ball position.
 	var dx: float = ball.global_position.x - _carrier.global_position.x
 	var dz: float = ball.global_position.z - _carrier.global_position.z
@@ -299,6 +329,87 @@ func _tick_dribble_impulses(delta: float) -> void:
 	# in the previous heading. Bounded by speed + radius gates so the
 	# kick-chase rhythm survives.
 	_apply_magnetic_centering(delta, carrier_v, carrier_speed)
+
+
+## Carry direction = same blend used by the kick (visual_forward +
+## velocity dir, weighted by `kick_direction_blend_visual`). Returns
+## a unit vector or ZERO if neither input was usable.
+func _compute_carry_dir(carrier_v: Vector3, carrier_speed: float) -> Vector3:
+	var v_dir: Vector3 = Vector3.ZERO
+	if carrier_speed > 0.001:
+		v_dir = Vector3(carrier_v.x / carrier_speed, 0.0,
+			carrier_v.z / carrier_speed)
+	var fwd: Vector3 = _carrier.get_visual_forward()
+	var blend_w: float = clampf(kick_direction_blend_visual, 0.0, 1.0)
+	var raw: Vector3 = v_dir * (1.0 - blend_w) + fwd * blend_w
+	if raw.length_squared() < 0.001:
+		return Vector3.ZERO
+	return raw.normalized()
+
+
+## Turn-glue rotation. When the carrier's carry direction rotates
+## by > `turn_glue_min_angle_deg` between ticks AND the ball is
+## within `turn_glue_radius_m`, rotate the ball position (and its
+## velocity vector) around the carrier by the same delta angle.
+## Capped at `turn_glue_max_angle_per_tick_deg` so a sudden 180°
+## flip plays out across a few ticks instead of a single teleport.
+##
+## This is the ONE place the ball is "glued": it preserves the
+## relative offset and velocity orientation through the turn,
+## eliminating both the trailing-ball look and the magnetic-
+## centering snap-back that would otherwise be needed.
+func _apply_turn_glue(carrier_v: Vector3, carrier_speed: float) -> void:
+	if not turn_glue_enabled or _carrier == null or ball == null:
+		return
+	var carry_now: Vector3 = _compute_carry_dir(carrier_v, carrier_speed)
+	if carry_now.length_squared() < 0.001:
+		return
+	if _last_carry_dir.length_squared() < 0.001:
+		_last_carry_dir = carry_now
+		return  ## first tick — establish baseline
+	var p_pos: Vector3 = _carrier.global_position
+	var b_pos: Vector3 = ball.global_position
+	var rel_x: float = b_pos.x - p_pos.x
+	var rel_z: float = b_pos.z - p_pos.z
+	if rel_x * rel_x + rel_z * rel_z > turn_glue_radius_m * turn_glue_radius_m:
+		_last_carry_dir = carry_now
+		return  ## ball too loose for glue; let kick / centering act
+	# Signed planar angle delta from _last_carry_dir → carry_now.
+	var ang_a: float = atan2(_last_carry_dir.z, _last_carry_dir.x)
+	var ang_b: float = atan2(carry_now.z, carry_now.x)
+	var dtheta: float = ang_b - ang_a
+	if dtheta > PI:
+		dtheta -= TAU
+	elif dtheta < -PI:
+		dtheta += TAU
+	var min_ang: float = deg_to_rad(turn_glue_min_angle_deg)
+	if absf(dtheta) < min_ang:
+		_last_carry_dir = carry_now
+		return  ## no meaningful turn this tick
+	# Cap per-tick rotation; rebuild last_carry_dir as the partial
+	# rotation result so the remaining delta plays out next tick.
+	var cap: float = deg_to_rad(turn_glue_max_angle_per_tick_deg)
+	var applied: float = clampf(dtheta, -cap, cap)
+	var cos_a: float = cos(applied)
+	var sin_a: float = sin(applied)
+	# Rotate the ball position relative to the carrier (around Y).
+	var new_rel_x: float = rel_x * cos_a - rel_z * sin_a
+	var new_rel_z: float = rel_x * sin_a + rel_z * cos_a
+	ball.teleport_to(Vector3(p_pos.x + new_rel_x, b_pos.y, p_pos.z + new_rel_z))
+	# Rotate the ball velocity by the same angle so the post-glue
+	# trajectory matches the new heading (no whip-snap).
+	var bv: Vector3 = ball.linear_velocity
+	var new_bvx: float = bv.x * cos_a - bv.z * sin_a
+	var new_bvz: float = bv.x * sin_a + bv.z * cos_a
+	ball.apply_launch_state(Vector3(new_bvx, bv.y, new_bvz))
+	# Rotate the partial-applied baseline so the remaining delta
+	# (if we capped) is consumed on the next tick.
+	if absf(applied) < absf(dtheta):
+		var partial_x: float = _last_carry_dir.x * cos_a - _last_carry_dir.z * sin_a
+		var partial_z: float = _last_carry_dir.x * sin_a + _last_carry_dir.z * cos_a
+		_last_carry_dir = Vector3(partial_x, 0.0, partial_z).normalized()
+	else:
+		_last_carry_dir = carry_now
 
 
 ## Passive brake — when carrier intent is "stop" (low velocity) and the
@@ -582,3 +693,4 @@ func _clear_carrier_flag() -> void:
 			_carrier.on_possession_lost()
 		_carrier.has_ball = false
 	_last_kick_direction = Vector3.ZERO
+	_last_carry_dir = Vector3.ZERO

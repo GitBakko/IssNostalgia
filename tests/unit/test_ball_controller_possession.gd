@@ -716,3 +716,97 @@ func test_centering_skipped_within_dead_zone() -> void:
 		var min_kick: float = p.max_walk_speed * bc.kick_factor_walk * 0.9
 		assert_gt(planar, min_kick,
 			"If anything fires here it must be the kick (boost factor), not centering")
+
+
+# ---- Turn-glue (Bug 4, "ball must rotate with carrier on turn") --------
+
+func test_turn_glue_rotates_ball_around_carrier() -> void:
+	# Carrier moving +X with ball at (0.4, *, 0) (right of carrier).
+	# Carrier rotates carry direction to +Z (90° turn). Ball must
+	# rotate to (0, *, 0.4) — same offset distance, new heading.
+	# Capped at turn_glue_max_angle_per_tick_deg per tick (12° default),
+	# so the rotation snap covers `cap` degrees this tick, not the full
+	# 90°. Both _pending_teleport and _pending_linear must be staged.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)
+	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(1, 0, 0), Vector3.UP)
+	bc._assign_carrier(p)
+	# Establish carry-dir baseline at +X with one tick.
+	ball.global_position = Vector3(0.4, 0.11, 0.0)  ## inside turn_glue_radius
+	ball.linear_velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## moving +X with carrier
+	ball._pending_linear = null
+	ball._pending_teleport = null
+	bc._last_carry_dir = Vector3(1.0, 0.0, 0.0)  ## baseline = +X
+	# Now the carrier turns to +Z.
+	p.velocity = Vector3(0.0, 0.0, p.max_walk_speed)
+	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(0, 0, 1), Vector3.UP)
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_teleport,
+		"Turn-glue must stage a position teleport when carrier rotates")
+	assert_not_null(ball._pending_linear,
+		"Turn-glue must stage a velocity rotation alongside the teleport")
+	var teleport: Vector3 = ball._pending_teleport as Vector3
+	# Cap is 12°: rotated +X by +12° (since +X→+Z is +90° in atan2 terms,
+	# actually atan2(0,1)=0 → atan2(1,0)=π/2 = +90°, so dtheta = +90°,
+	# capped to +12°). Rotation matrix on (0.4, 0): new_x = 0.4*cos(12°)
+	# ≈ 0.391, new_z = 0.4*sin(12°) ≈ 0.083. Ball must move toward +Z
+	# while x decreases slightly.
+	assert_lt(teleport.x, 0.4, "Ball X should decrease (rotated toward +Z)")
+	assert_gt(teleport.z, 0.0, "Ball Z should increase (rotated toward +Z)")
+	# Distance from carrier preserved (rotation doesn't change radius).
+	var radius: float = sqrt(teleport.x * teleport.x + teleport.z * teleport.z)
+	assert_almost_eq(radius, 0.4, 0.01,
+		"Turn-glue rotation must preserve ball distance from carrier")
+
+
+func test_turn_glue_skipped_when_ball_outside_radius() -> void:
+	# Ball beyond turn_glue_radius_m → no rotation snap, the loose
+	# ball just keeps physics + centering / kick logic.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)
+	bc._assign_carrier(p)
+	# Ball outside the glue radius (1.0) and outside the centering
+	# radius (1.5) so neither path stages a teleport.
+	ball.global_position = Vector3(2.0, 0.11, 0.0)
+	ball.linear_velocity = Vector3.ZERO
+	ball._pending_teleport = null
+	bc._last_carry_dir = Vector3(1.0, 0.0, 0.0)
+	# Now turn 90°.
+	p.velocity = Vector3(0.0, 0.0, p.max_walk_speed)
+	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(0, 0, 1), Vector3.UP)
+	bc.step(1.0 / 60.0)
+	assert_eq(ball._pending_teleport, null,
+		"Turn-glue must not teleport a loose ball outside the radius")
+
+
+func test_turn_glue_skipped_when_carry_direction_steady() -> void:
+	# Carrier moving steadily — same carry direction tick over tick.
+	# No rotation should be staged.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -0.5)
+	ball.linear_velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
+	ball._pending_teleport = null
+	bc.step(1.0 / 60.0)
+	assert_eq(ball._pending_teleport, null,
+		"Steady carry direction must not trigger a turn-glue teleport")
+
+
+func test_turn_glue_baseline_resets_when_carrier_stops() -> void:
+	# Carrier slow → turn-glue baseline must reset so the next
+	# movement starts fresh (no spurious "turn" from old baseline).
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3.ZERO  ## below kick_min
+	bc._assign_carrier(p)
+	bc._last_carry_dir = Vector3(1.0, 0.0, 0.0)  ## stale +X baseline
+	ball.global_position = Vector3(0.0, 0.11, -0.3)
+	ball.linear_velocity = Vector3.ZERO
+	bc.step(1.0 / 60.0)
+	assert_eq(bc._last_carry_dir, Vector3.ZERO,
+		"Turn-glue baseline must clear when carrier drops below kick_min")
