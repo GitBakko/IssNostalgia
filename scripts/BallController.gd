@@ -98,6 +98,36 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## complete planar stop (avoids endless tiny crawls).
 @export var brake_snap_threshold_m_s: float = 0.4
 
+@export_group("Magnetic centering (R02-F03 PhysicsFC carry-zone)")
+## Master switch. When false, the ball coasts purely under physics
+## between kicks (the original Architecture-B feel).
+@export var centering_enabled: bool = true
+## Ideal carry distance ahead of the carrier along carry_dir
+## (visual_forward + velocity blend). 0.45 m sits the ball just
+## beyond the foot — within next-touch reach but visibly "ahead".
+@export var centering_offset_m: float = 0.45
+## Position-error magnitude below which centering is a no-op
+## (avoids jitter when the ball is already in the carry zone).
+@export var centering_dead_zone_m: float = 0.15
+## Per-second pull rate. 4.0 → ~87 % of error closed in 0.5 s.
+## NOT a "glue" — the ball still flies on kicks and decelerates
+## via drag; centering only fires between kicks while the ball
+## is slow enough (< centering_max_ball_speed_m_s) and inside
+## centering_max_radius_m. Tuned conservative so the visible
+## kick-chase rhythm survives.
+@export var centering_pull_per_sec: float = 4.0
+## Caps the corrective velocity component added on top of the
+## carrier-matched baseline. Prevents teleport-feeling snaps.
+@export var centering_max_correction_m_s: float = 5.0
+## Beyond this distance from the carrier, centering is skipped —
+## the loss threshold (3 m) takes over instead. Centering is for
+## small carry-zone deviations during turns, not full recoveries.
+@export var centering_max_radius_m: float = 1.5
+## Centering is skipped while the ball is moving faster than this
+## (e.g. just been kicked, mid-shot). Lets natural physics play
+## out before the carry-zone pull resumes.
+@export var centering_max_ball_speed_m_s: float = 8.0
+
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
 ## All TeamControllers participating in this match. The order is
@@ -250,13 +280,21 @@ func _tick_dribble_impulses(delta: float) -> void:
 	# Geometric trigger: carrier body reached the ball position.
 	var dx: float = ball.global_position.x - _carrier.global_position.x
 	var dz: float = ball.global_position.z - _carrier.global_position.z
-	if dx * dx + dz * dz > kick_proximity_m * kick_proximity_m:
-		return  ## not yet at the ball — let carrier chase
-	# FIRE THE KICK — ball gets carrier_v * factor. Uses carrier
-	# velocity direction (not ball direction) so ball always flies
-	# in the player's current heading, even on hard turns.
-	_apply_proximity_kick(carrier_v)
-	_kick_lockout_remaining_s = kick_lockout_s
+	if dx * dx + dz * dz <= kick_proximity_m * kick_proximity_m \
+			and _kick_lockout_remaining_s <= 0.0:
+		# FIRE THE KICK — ball gets carrier_v * factor. Uses carrier
+		# velocity direction (not ball direction) so ball always flies
+		# in the player's current heading, even on hard turns.
+		_apply_proximity_kick(carrier_v)
+		_kick_lockout_remaining_s = kick_lockout_s
+		return
+	# Not at the ball this tick: continuously pull the ball toward the
+	# carry zone (player + carry_dir * offset). Cleans up the slow drift
+	# that accumulates during circular sweeps where each input step
+	# stays under the buffer dead-zone but the ball still keeps flying
+	# in the previous heading. Bounded by speed + radius gates so the
+	# kick-chase rhythm survives.
+	_apply_magnetic_centering(delta, carrier_v, carrier_speed)
 
 
 ## Passive brake — when carrier intent is "stop" (low velocity) and the
@@ -279,6 +317,71 @@ func _apply_passive_brake(delta: float) -> void:
 		return
 	var factor: float = clampf(1.0 - brake_decay_per_sec * delta, 0.0, 1.0)
 	ball.apply_launch_state(Vector3(v.x * factor, v.y, v.z * factor))
+
+
+## Carry-zone magnetic centering. Each non-kick tick (carrier moving
+## but not at proximity yet, or in kick lockout), nudges the ball's
+## planar velocity toward the ideal carry point ahead of the carrier.
+##
+## NOT continuous-tracking glue (Architecture C, explicitly rejected):
+##   - skipped while ball planar speed > centering_max_ball_speed_m_s
+##     (just-kicked ball flies free until drag slows it),
+##   - skipped beyond centering_max_radius_m (loss threshold owns
+##     the recovery arc past 1.5 m),
+##   - skipped within centering_dead_zone_m (no jitter when settled),
+##   - corrective velocity capped by centering_max_correction_m_s.
+##
+## The visible kick → fly → catch-up rhythm is preserved; the centering
+## only fixes the residual drift that accumulates during slow circular
+## direction sweeps where each input step is below the buffer dead-zone.
+func _apply_magnetic_centering(delta: float, carrier_v: Vector3,
+		carrier_speed: float) -> void:
+	if not centering_enabled or _carrier == null or ball == null:
+		return
+	var bv: Vector3 = ball.linear_velocity
+	if bv.x * bv.x + bv.z * bv.z \
+			> centering_max_ball_speed_m_s * centering_max_ball_speed_m_s:
+		return
+	var p_pos: Vector3 = _carrier.global_position
+	var b_pos: Vector3 = ball.global_position
+	var to_ball_x: float = b_pos.x - p_pos.x
+	var to_ball_z: float = b_pos.z - p_pos.z
+	if to_ball_x * to_ball_x + to_ball_z * to_ball_z \
+			> centering_max_radius_m * centering_max_radius_m:
+		return
+	# Carry direction = same blend used by the kick (visual_forward
+	# + velocity dir). Keeps the ball aligned with where the player
+	# is heading next, not just where they're going right now.
+	var v_dir: Vector3 = Vector3(carrier_v.x / carrier_speed, 0.0,
+		carrier_v.z / carrier_speed)
+	var fwd_dir: Vector3 = _carrier.get_visual_forward()
+	var blend_w: float = clampf(kick_direction_blend_visual, 0.0, 1.0)
+	var carry_raw: Vector3 = v_dir * (1.0 - blend_w) + fwd_dir * blend_w
+	var carry_dir: Vector3 = v_dir
+	if carry_raw.length_squared() > 0.001:
+		carry_dir = carry_raw.normalized()
+	var ideal_x: float = p_pos.x + carry_dir.x * centering_offset_m
+	var ideal_z: float = p_pos.z + carry_dir.z * centering_offset_m
+	var err_x: float = ideal_x - b_pos.x
+	var err_z: float = ideal_z - b_pos.z
+	var err_len: float = sqrt(err_x * err_x + err_z * err_z)
+	if err_len < centering_dead_zone_m:
+		return
+	# Target velocity = match the carrier's planar motion + corrective
+	# pull toward the ideal point. Cap the correction magnitude so the
+	# ball never visibly teleports.
+	var corr_speed: float = clampf(err_len * centering_pull_per_sec,
+		0.0, centering_max_correction_m_s)
+	var corr_x: float = (err_x / err_len) * corr_speed
+	var corr_z: float = (err_z / err_len) * corr_speed
+	var target_vx: float = carry_dir.x * carrier_speed + corr_x
+	var target_vz: float = carry_dir.z * carrier_speed + corr_z
+	# Lerp planar velocity toward target. alpha is dt-scaled so frame
+	# rate doesn't change the perceived feel.
+	var alpha: float = clampf(centering_pull_per_sec * delta, 0.0, 1.0)
+	var new_vx: float = lerpf(bv.x, target_vx, alpha)
+	var new_vz: float = lerpf(bv.z, target_vz, alpha)
+	ball.apply_launch_state(Vector3(new_vx, bv.y, new_vz))
 
 
 func _apply_proximity_kick(carrier_v: Vector3) -> void:

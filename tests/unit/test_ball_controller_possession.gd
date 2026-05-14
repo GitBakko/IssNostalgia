@@ -211,19 +211,20 @@ func test_kick_dampened_on_sharp_turn() -> void:
 
 
 func test_no_kick_when_carrier_far_from_ball() -> void:
-	# Ball outside kick_proximity_m → no kick. Ball coasts under
-	# free physics; carrier must close the gap to trigger one.
+	# Ball outside kick_proximity_m AND outside centering_max_radius_m
+	# → neither a proximity-kick nor a centering correction. Ball
+	# coasts under free physics; carrier must close the gap.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	# Ball OUTSIDE proximity radius (0.35 m) but inside loss (3.0 m).
-	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	# Ball OUTSIDE centering radius (1.5 m), inside loss (3.0 m).
+	ball.global_position = Vector3(0.0, 0.11, -2.0)
 	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)
 	bc._assign_carrier(p)
 	ball._pending_linear = null
 	bc.step(1.0 / 60.0)
 	assert_eq(ball._pending_linear, null,
-		"Ball outside kick_proximity_m must NOT trigger a kick")
+		"Ball outside kick_proximity_m AND centering radius must NOT stage state")
 
 
 func test_no_kick_when_carrier_almost_still() -> void:
@@ -642,3 +643,76 @@ func test_passive_brake_skipped_when_ball_far() -> void:
 	bc.step(1.0 / 60.0)
 	assert_eq(ball._pending_linear, null,
 		"Carrier still + ball far → no brake (loss threshold takes over)")
+
+
+# ---- Magnetic centering (Bug 3, circular-sweep playtest 2026-05-14) ----
+
+func test_centering_pulls_ball_toward_carry_zone() -> void:
+	# Carrier moving -Z at walk speed, ball OUTSIDE proximity (0.35)
+	# but within centering radius (1.5). No kick this tick → centering
+	# must stage a velocity that pulls the ball toward the ideal
+	# carry point (carrier + carry_dir * 0.45).
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -1.0)  ## ahead, > proximity
+	ball.linear_velocity = Vector3(0.0, 0.0, -1.0)   ## slow drift
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_linear,
+		"Centering must stage a velocity correction when ball within radius")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	# Ball was at -1.0, ideal is at -0.45 → error points +Z. Target Z
+	# velocity = carry_dir.z * carrier_speed + corr_z = -5.5 + positive corr.
+	# After short lerp the new vz lies between -1.0 (current) and target.
+	assert_lt(pending.z, 0.0, "Ball still moving in carry direction (-Z)")
+	assert_gt(pending.z, -p.max_walk_speed,
+		"Centering pull keeps ball below pure carrier_speed (-5.5)")
+
+
+func test_centering_skipped_when_ball_just_kicked() -> void:
+	# Ball moving > centering_max_ball_speed_m_s → centering bows out
+	# and lets natural drag carry the just-kicked ball.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	ball.linear_velocity = Vector3(0.0, 0.0, -bc.centering_max_ball_speed_m_s - 1.0)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_eq(ball._pending_linear, null,
+		"Centering must skip while ball is moving faster than the speed cap")
+
+
+func test_centering_skipped_within_dead_zone() -> void:
+	# Ball already very close to ideal point → no jitter correction.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	# Visual_forward defaults to -Z when scene basis is identity, so
+	# ideal_pos = (0, *, -0.45). Place ball there.
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -bc.centering_offset_m)
+	ball.linear_velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	# Within dead-zone OR proximity (0.35 m → kick fires). Either way the
+	# behavior is deterministic and not the centering pull. We only assert
+	# the centering branch wasn't the one that staged the value: if a
+	# pending exists, its magnitude is the kick (carrier_speed * factor),
+	# not the centering output.
+	# Either the proximity kick fires (ball is at 0.45 m which is just
+	# beyond the 0.35 m kick gate, so usually no kick this tick) OR the
+	# centering branch decides the ball is in its dead zone. Both leave
+	# the centering pull silent — assert no centering-shaped output.
+	if ball._pending_linear == null:
+		assert_eq(ball._pending_linear, null,
+			"Centering must not stage anything within the dead zone")
+	else:
+		var pending: Vector3 = ball._pending_linear as Vector3
+		var planar: float = sqrt(pending.x * pending.x + pending.z * pending.z)
+		var min_kick: float = p.max_walk_speed * bc.kick_factor_walk * 0.9
+		assert_gt(planar, min_kick,
+			"If anything fires here it must be the kick (boost factor), not centering")
