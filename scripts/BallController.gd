@@ -46,13 +46,17 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## reaches ball" — no periodic timer, the cycle length emerges from
 ## drag + carrier speed (real football: kick → coast → catch up → kick).
 @export var kick_proximity_m: float = 0.35
-## Boost factor on the carrier velocity at WALK speed. 1.20 = ball
-## leaves 20 % faster than carrier → ~1.6 m flight before drag brings
-## it back below carrier speed. Tuned 2026-05-14 per user playtest.
-@export var kick_factor_walk: float = 1.20
+## Boost factor on the carrier velocity at WALK speed. 1.08 = ball
+## leaves 8 % faster than carrier → ~0.5–0.7 m flight before drag
+## brings it back. Short hops, tight close-control feel. Tuned
+## 2026-05-14 per user playtest. Will become per-player attribute
+## (close_control / dribble_skill) in Sprint 9 — see R02-F07.
+@export var kick_factor_walk: float = 1.08
 ## Boost factor at SPRINT speed (carrier_speed > max_walk_speed).
-## 1.35 → ~4.5 m flight, "tocco lungo" feel of attackers in space.
-@export var kick_factor_sprint: float = 1.35
+## 1.18 → ~1.8–2.2 m flight, attackers cover ground but the ball
+## stays in the carry zone. Tuned 2026-05-14 per user playtest.
+## Per-player override planned for Sprint 9 (R02-F07 attributes).
+@export var kick_factor_sprint: float = 1.18
 ## Fix #2 (R09-F04 anim warp + R02-F03 blend): kick direction = blend
 ## of carrier visual_forward (rotates immediately on input) and
 ## carrier.velocity (physical, lags on hard turn). 0.0 = pure
