@@ -146,24 +146,70 @@ func test_human_team_wins_simultaneous_pickup() -> void:
 		"Human team A must win tie against AI team B (S06-D03)")
 
 
-# ---- S08-T02 dribble impulse model (R02-F05 Architecture B) -----------
+# ---- S08-T02 continuous dribble tracking (R02-F05 Arch C) -------------
 
-func test_no_position_copy_during_possession() -> void:
-	# Architecture B invariant: the ball is NOT teleported every tick to
-	# match the carrier — it's a live RigidBody3D the whole time. Setting
-	# the carrier and stepping must NOT move the ball.
+func test_position_tracks_carry_target() -> void:
+	# Architecture C: each tick the ball position lerps toward
+	# carrier_position + visual_forward * carry_distance_m. After
+	# enough ticks the ball must converge to that target on the XZ
+	# plane, regardless of where it started.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3.ZERO
-	ball.global_position = Vector3(0.7, 0.11, -0.5)
+	# Default visual forward = -Z (Basis.IDENTITY's -Z).
+	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
+	ball.global_position = Vector3(2.0, 0.11, 1.5)  ## arbitrary start
+	bc._assign_carrier(p)
+	for _i in 30:  ## ~0.5 s at 60 fps
+		bc.step(1.0 / 60.0)
+	# Expected target: 0.45 m in -Z direction from origin.
+	assert_almost_eq(ball.global_position.x, 0.0, 0.05,
+		"Ball must converge to carry target X (= carrier.x)")
+	assert_almost_eq(ball.global_position.z, -bc.carry_distance_m, 0.05,
+		"Ball must converge to carry target Z (= -carry_distance_m)")
+
+
+func test_velocity_tracks_carrier_velocity() -> void:
+	# Ball XZ velocity is staged toward carrier velocity each tick via
+	# the BallPhysics pending pipeline. In real runtime the integrator
+	# consumes _pending_linear → ball.linear_velocity converges to
+	# carrier velocity. Tests don't run physics, so we assert the
+	# staged value (_pending_linear) directly.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	ball.global_position = Vector3(0.0, 0.11, -0.45)
 	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	# Nothing should snap the ball to a carry-offset position.
 	bc.step(1.0 / 60.0)
-	assert_almost_eq(ball.global_position.x, 0.7, 1.0e-3,
-		"Possession must NOT teleport the ball X")
-	assert_almost_eq(ball.global_position.z, -0.5, 1.0e-3,
-		"Possession must NOT teleport the ball Z")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	# After 1 tick at strength 0.65, alpha = 0.65; ball v staged at
+	# lerp(0, -5.5, 0.65) ≈ -3.575.
+	assert_lt(pending.z, -2.0,
+		"Velocity tracker must stage a strong move toward carrier velocity")
+
+
+func test_position_tracking_preserves_y() -> void:
+	# Ball Y position must NOT be touched by the tracker — gravity +
+	# bounce own vertical motion.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3.ZERO
+	ball.global_position = Vector3(0.5, 0.5, -0.3)  ## elevated
+	ball.linear_velocity = Vector3.ZERO
+	bc._assign_carrier(p)
+	bc.step(1.0 / 60.0)
+	assert_almost_eq(ball.global_position.y, 0.5, 1.0e-3,
+		"Tracker must NOT modify ball Y position")
+
+
+func test_legacy_no_position_copy_when_not_carried() -> void:
+	# Sanity: when nobody carries the ball, the tracker is silent.
+	var initial_pos: Vector3 = Vector3(2.0, 0.11, 1.5)
+	ball.global_position = initial_pos
+	bc.step(1.0 / 60.0)
+	assert_eq(ball.global_position, initial_pos,
+		"No carrier → tracker must not move the ball")
 
 
 # ---- release proxy ------------------------------------------------------
@@ -255,133 +301,39 @@ func test_receiver_keeps_facing_when_ball_at_rest() -> void:
 
 # ---- S08-T02 dribble impulse model (R02-F05 Architecture B) ------------
 
-func test_dribble_impulse_fires_at_walk_interval() -> void:
-	# Carrier walking — after touch_interval_walk_s the BallController
-	# stages an apply_launch_state on the ball. Carrier flag remains
-	# (no release; ball is just nudged). Ball must be inside
-	# control_radius_m (1.0 m) but outside proximity radius (0.45 m).
+func test_carrier_still_ball_settles_at_carry_target() -> void:
+	# Carrier stationary → ball converges to carry_target (0.45 m
+	# in carrier visual_forward) and STAYS there with near-zero
+	# velocity (drag/friction will damp any residual).
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	ball.global_position = Vector3(0.0, 0.11, -0.7)  ## inside control radius
-	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## same direction as carrier
+	p.velocity = Vector3.ZERO
+	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
+	ball.global_position = Vector3(2.0, 0.11, 1.0)
+	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	ball._pending_linear = null  ## set AFTER assign (which writes ZERO)
-	# Pre-interval: no impulse, still carrying.
-	bc.step(bc.touch_interval_walk_s * 0.5)
-	assert_eq(ball._pending_linear, null,
-		"Mid-interval no impulse staged")
-	assert_eq(bc.get_carrier(), p, "Carrier flag preserved")
-	# Cross the interval: impulse applied; carrier flag still set.
-	bc.step(bc.touch_interval_walk_s * 0.6)
-	assert_eq(bc.get_carrier(), p,
-		"Dribble impulse must NOT release the carrier")
-	assert_not_null(ball._pending_linear,
-		"Touch interval crossed → impulse staged via apply_launch_state")
-	# Peak kick velocity = carrier_speed * lead + drag * interval / 2.
-	var expected_speed: float = (
-		p.velocity.length() * bc.ball_avg_lead_factor
-		+ bc.drag_compensation_m_s2 * bc.touch_interval_walk_s * 0.5
-	)
-	var pending: Vector3 = ball._pending_linear as Vector3
-	var planar_speed: float = Vector2(pending.x, pending.z).length()
-	assert_almost_eq(planar_speed, expected_speed, 1.0e-2,
-		"Impulse XZ speed must equal lead*carrier + drag*interval/2 (formula)")
+	for _i in 60:  ## ~1 s
+		bc.step(1.0 / 60.0)
+	assert_almost_eq(ball.global_position.x, 0.0, 0.05)
+	assert_almost_eq(ball.global_position.z, -bc.carry_distance_m, 0.05)
 
 
-func test_dribble_impulse_uses_sprint_cadence_above_walk() -> void:
+func test_position_tracks_carrier_visual_facing() -> void:
+	# Rotate carrier visual basis 90° → carry target rotates with it.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
-	# Inside control_radius_m but outside proximity radius.
-	ball.global_position = Vector3(0.0, 0.11, -0.7)
-	ball.linear_velocity = Vector3(0.0, 0.0, -5.0)
+	p.velocity = Vector3.ZERO
+	# Visual forward = +X (rotate basis 90° clockwise around Y → -Z
+	# becomes +X). Use looking_at to face +X direction.
+	var vr: Node3D = p.get_node(^"VisualRoot")
+	vr.transform.basis = Basis.looking_at(Vector3(1.0, 0.0, 0.0), Vector3.UP)
+	ball.global_position = Vector3(0.0, 0.11, 0.0)
+	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	# set_possessed clears pending_linear to ZERO (not null) — set to
-	# null here so the test detects the impulse via != null.
-	ball._pending_linear = null
-	# Below sprint interval — no impulse yet.
-	bc.step(bc.touch_interval_sprint_s * 0.5)
-	assert_eq(ball._pending_linear, null)
-	bc.step(bc.touch_interval_sprint_s * 0.6)
-	assert_not_null(ball._pending_linear,
-		"Sprint cadence (touch_interval_sprint_s) must drive the impulse")
-
-
-func test_proximity_override_kicks_ball_about_to_be_overtaken() -> void:
-	# Carrier moving onto a slow ball within kick_on_proximity_m
-	# fires an immediate impulse — without it the ball ends up under
-	# the player capsule until the next periodic touch.
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	# Ball within proximity radius (0.45 m), nearly stopped.
-	ball.global_position = Vector3(0.0, 0.11, -0.3)
-	ball.linear_velocity = Vector3(0.0, 0.0, -0.5)  ## << carrier_speed * 0.5
-	bc._assign_carrier(p)
-	ball._pending_linear = null
-	# A SINGLE small step — well under any periodic interval.
-	bc.step(0.01)
-	assert_not_null(ball._pending_linear,
-		"Proximity override must fire impulse immediately, not wait for timer")
-
-
-func test_direction_change_override_aligns_ball_with_carrier() -> void:
-	# Carrier turns 90°; ball still rolling old direction. The
-	# direction-change override must fire an impulse so the ball
-	# tracks the new heading instead of lagging behind. Ball must be
-	# INSIDE control_radius_m for the kick to fire.
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## carrier going +X
-	ball.global_position = Vector3(0.6, 0.11, -0.4)  ## within control_radius
-	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## stale -Z direction
-	bc._assign_carrier(p)
-	ball._pending_linear = null
-	bc.step(0.01)
-	assert_not_null(ball._pending_linear,
-		"Direction change > 35° must fire an immediate kick to align ball")
-	var pending: Vector3 = ball._pending_linear as Vector3
-	assert_gt(pending.x, 0.0,
-		"Re-aligned impulse must point in the carrier's new direction (+X)")
-
-
-func test_no_kick_when_ball_outside_control_radius() -> void:
-	# Ball outside control_radius_m but inside loss_threshold — must
-	# coast freely. NO periodic kick, NO direction-change override.
-	# This is the "carrier chases escaped ball" state.
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	# Ball outside control (1.0 m) but inside loss (2.0 m), going
-	# perpendicular (would otherwise trigger direction-change kick).
-	ball.global_position = Vector3(0.0, 0.11, -1.5)
-	ball.linear_velocity = Vector3(3.0, 0.0, 0.0)  ## perpendicular
-	bc._assign_carrier(p)
-	ball._pending_linear = null
-	# Tick well past any periodic interval.
-	bc.step(bc.touch_interval_walk_s + 0.1)
-	assert_eq(ball._pending_linear, null,
-		"Ball outside control_radius must coast — no kick fires")
-	assert_eq(bc.get_carrier(), p,
-		"Carrier flag preserved while ball coasts in the chase band")
-
-
-func test_dribble_skipped_when_carrier_almost_still() -> void:
-	# Below the touch_min_speed_m_s gate, no impulse ever staged. Drag
-	# + rolling friction stop the ball naturally near the player.
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3(0.0, 0.0, -bc.touch_min_speed_m_s * 0.5)
-	ball.global_position = Vector3.ZERO
-	bc._assign_carrier(p)
-	# set_possessed clears pending_linear to ZERO (not null) — set to
-	# null here so the test detects the impulse via != null.
-	ball._pending_linear = null
-	bc.step(bc.touch_interval_walk_s * 5.0)
-	assert_eq(ball._pending_linear, null,
-		"Carrier almost still → no dribble impulse")
-	assert_eq(bc.get_carrier(), p, "Carrier flag preserved")
+	for _i in 30:
+		bc.step(1.0 / 60.0)
+	assert_almost_eq(ball.global_position.x, bc.carry_distance_m, 0.05,
+		"Ball must converge along visual +X when carrier faces +X")
 
 
 func test_loss_threshold_clears_carrier() -> void:
@@ -492,31 +444,27 @@ func test_collision_exception_cleared_on_loss() -> void:
 		"Loss must remove the carrier from the exception list")
 
 
-func test_pickup_primes_ball_when_carrier_already_moving() -> void:
-	# Player approaches a still ball at sprint speed. On pickup the
-	# ball must immediately match the carrier's velocity (× factor),
-	# otherwise the carrier walks PAST the ball before the first
-	# scheduled touch impulse and the loss-threshold gate trips.
+func test_pickup_with_moving_carrier_converges_via_tracking() -> void:
+	# Continuous tracking handles the "running onto a still ball"
+	# scenario without an explicit prime impulse — within a few frames
+	# the ball's position and velocity match the carry target.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
 	ball.global_position = Vector3(0.0, 0.11, 0.0)
-	ball._pending_linear = null
+	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	# A prime impulse must have staged the carrier-velocity * factor.
-	assert_not_null(ball._pending_linear,
-		"Pickup with moving carrier must prime the ball velocity")
+	# A few ticks at 60 fps to converge.
+	for _i in 20:
+		bc.step(1.0 / 60.0)
+	# Position converged to carry target.
+	assert_almost_eq(ball.global_position.z, -bc.carry_distance_m, 0.1)
+	# Velocity tracker has staged a value close to carrier velocity
+	# (read pending; physics doesn't run in tests).
 	var pending: Vector3 = ball._pending_linear as Vector3
-	var planar_speed: float = Vector2(pending.x, pending.z).length()
-	# Sprint regime → uses sprint interval for drag compensation.
-	var interval: float = bc.touch_interval_sprint_s if p.velocity.length() > p.max_walk_speed \
-		else bc.touch_interval_walk_s
-	var expected: float = (
-		p.velocity.length() * bc.ball_avg_lead_factor
-		+ bc.drag_compensation_m_s2 * interval * 0.5
-	)
-	assert_almost_eq(planar_speed, expected, 1.0e-2,
-		"Prime impulse must follow the same drag-compensated formula")
+	assert_lt(pending.z, -3.0,
+		"Velocity tracker must stage strong move toward carrier velocity")
 
 
 func test_shoot_release_still_arms_lockout() -> void:

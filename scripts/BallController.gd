@@ -39,60 +39,24 @@ const PICKUP_RADIUS_SQ: float = PICKUP_RADIUS_M * PICKUP_RADIUS_M
 const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
 
-@export_group("Dribble impulses (S08-T02 / R02-F05 Arch B)")
-## Touch interval at WALK speed. Long enough that the ball coasts
-## visibly between kicks (gap grows to ~0.7 m, then ball decelerates
-## and player closes the gap — visible launch / chase / launch cycle,
-## not a constant tether). Tuned 2026-05-14 after "rope-tied" feedback.
-@export var touch_interval_walk_s: float = 0.55
-## Touch interval at SPRINT speed.
-@export var touch_interval_sprint_s: float = 0.40
-## Minimum carrier speed to start emitting impulses. Below this the
-## carrier is essentially still — let drag + rolling friction stop the
-## ball naturally near the player.
-@export var touch_min_speed_m_s: float = 1.0
-## Desired AVERAGE ball speed over a kick interval, as multiple of
-## carrier speed. 1.10 = ball runs 10 % faster than carrier on
-## average → ball drifts ahead by carrier_speed × 0.10 × interval per
-## cycle. The peak kick velocity is computed to compensate for drag so
-## the AVERAGE matches — without this the kick velocity bleeds away
-## under drag and ball ends up BEHIND the carrier after 3-4 cycles
-## (playtest 2026-05-14). This is semantically clearer than a raw
-## peak factor.
-@export var ball_avg_lead_factor: float = 1.10
-## Estimated ball deceleration during a kick interval (rolling friction
-## + air drag, averaged). Used to derive the peak kick velocity from
-## the desired average. Tune up if ball still lags, down if it overshoots.
-@export var drag_compensation_m_s2: float = 5.0
-## CONTROL RADIUS — the ball is only kicked when this close to the
-## carrier. Outside this radius (but still inside loss_threshold)
-## the ball coasts freely under drag + friction; the carrier has to
-## CHASE it to regain control. Without this gate every periodic /
-## proximity / direction-change trigger could re-launch a ball that's
-## already escaping, making the carrier feel like they never had it.
-@export var control_radius_m: float = 1.0
-## Loss threshold (R02-F05). When the ball drifts beyond this distance
-## from the carrier on the XZ plane, possession is automatically
-## released. Must be > control_radius_m so there's a "free coast"
-## band between in-control and lost.
-@export var loss_threshold_m: float = 2.0
-## Brief pickup lockout when possession is lost via the loss-threshold
-## drift. Stops the carrier from instantly re-grabbing a ball still
-## drifting away from them — the dribble must "miss" cleanly before
-## any player can re-acquire. Short enough that a recovery sprint
-## still feels responsive (~12 ticks at 120 Hz).
+@export_group("Dribble — continuous tracking (R02-F05 Arch C / R02-F03)")
+## Target distance ahead of the carrier (along visual forward) where
+## the ball should sit during possession. Effectively "at the foot".
+@export var carry_distance_m: float = 0.45
+## How aggressively the ball position tracks the carry target each
+## frame. 0 = no tracking (free physics), 1 = snap. 0.5 = converges
+## in ~3 frames at 60 fps. FR-independent.
+@export_range(0.0, 1.0, 0.01) var position_track_strength: float = 0.45
+## How aggressively the ball velocity matches the carrier velocity.
+## Same scale as position_track_strength.
+@export_range(0.0, 1.0, 0.01) var velocity_track_strength: float = 0.65
+## Loss threshold — only triggers when something physical pushes the
+## ball this far away (Sprint 9+ tackle). Continuous tracking keeps
+## the ball at carry_distance_m under normal play, so this is a
+## SAFETY rail, not the primary loss mechanism.
+@export var loss_threshold_m: float = 2.5
+## Brief pickup lockout when possession is lost.
 @export var touch_loss_lockout_s: float = 0.1
-## When the ball gets within this distance of the carrier AND the ball
-## is much slower than the carrier, fire a touch impulse IMMEDIATELY
-## (don't wait for the periodic timer). Without this the carrier
-## walks ONTO a stopped ball and the ball appears to disappear under
-## the capsule until the next periodic touch fires. Default 0.45 m =
-## just outside the player capsule radius.
-@export var kick_on_proximity_m: float = 0.45
-## When the angle between carrier velocity and ball velocity exceeds
-## this many degrees AND ball is within control_radius_m, fire a
-## touch impulse IMMEDIATELY so the ball tracks direction changes.
-@export var kick_on_direction_change_deg: float = 35.0
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -207,90 +171,51 @@ func _check_loss() -> bool:
 	return false
 
 
-## Periodic touch impulse (R02-F05 Architecture B / R02-F04 emergent
-## carry). Three trigger paths produce the touch:
-##   1. Periodic timer at `touch_interval_walk_s` / `touch_interval_sprint_s`
-##      — base rhythm for visible launch / chase cycle.
-##   2. Proximity override — ball about to be overtaken (carrier closing
-##      onto a slow ball). Without this the ball ends up under the
-##      capsule for the rest of the interval.
-##   3. Direction-change override — carrier velocity rotated > N degrees
-##      from ball velocity. Without this the ball lags behind on turns.
+## Continuous dribble tracking (R02-F05 Architecture C + R02-F03
+## "ball target-follows player at a blend of velocities"). EVERY
+## physics tick during possession:
+##   1. Compute carry target = carrier_position + visual_forward * carry_distance_m.
+##   2. Lerp ball.global_position toward carry_target (FR-independent).
+##   3. Lerp ball.linear_velocity (XZ) toward carrier.velocity
+##      (FR-independent).
+##   4. Y position / velocity preserved (gravity + bounce still own them).
+##
+## No periodic kicks. No "launch from far ahead" because the ball is
+## ALWAYS at the foot. Turning is instant because position tracking
+## follows the visual basis the moment it rotates.
+##
+## SHOOT/PASS still go through `request_release` which clears the
+## carrier and stages a launch velocity — the tracking system disengages
+## and the ball flies free.
 func _tick_dribble_impulses(delta: float) -> void:
 	if _carrier == null:
 		return
+	var fwd: Vector3 = _carrier.get_visual_forward()
+	# Carry target — XZ on the pitch plane, Y preserved from the live
+	# ball (gravity + bounce still own vertical motion).
+	var live_pos: Vector3 = ball.global_position
+	var carry_target: Vector3 = _carrier.global_position + fwd * carry_distance_m
+	carry_target.y = live_pos.y
+	# FR-independent lerp alpha — `1 - (1 - strength)^(delta * 60)`.
+	# At strength = 0.5, alpha at 60 fps = 0.5; at 120 fps each frame
+	# applies the equivalent slice.
+	var alpha_pos: float = 1.0 - pow(1.0 - position_track_strength, delta * 60.0)
+	var new_pos: Vector3 = live_pos.lerp(carry_target, alpha_pos)
+	# Apply position via direct write — ball is unfrozen but live.
+	# Direct global_position writes on a non-frozen RigidBody3D ARE
+	# permitted in Godot 4 and skip the staged-pending pipeline.
+	ball.global_position = new_pos
+
+	# Velocity tracking — XZ matches carrier; Y preserved.
 	var carrier_v: Vector3 = _carrier.velocity
-	var carrier_speed: float = carrier_v.length()
-	if carrier_speed < touch_min_speed_m_s:
-		_touch_timer_s = 0.0
-		return
-	_touch_timer_s += delta
-	var interval: float = touch_interval_walk_s
-	if carrier_speed > _carrier.max_walk_speed:
-		interval = touch_interval_sprint_s
-
-	# CONTROL-RADIUS GATE — outside this radius the ball is escaping.
-	# Don't kick it further; let the carrier chase it back into range.
-	# Without this gate, periodic / direction-change kicks fire on a
-	# ball that's already 1+ m away and re-launch it even further,
-	# producing the "carrier never has the ball" feel.
-	var dx: float = ball.global_position.x - _carrier.global_position.x
-	var dz: float = ball.global_position.z - _carrier.global_position.z
-	var dist_sq: float = dx * dx + dz * dz
-	var in_control: bool = dist_sq <= control_radius_m * control_radius_m
-	if not in_control:
-		return  ## ball escaping — don't kick, let carrier chase
-
-	var should_kick: bool = _touch_timer_s >= interval
-	# Proximity override — carrier about to step onto a slow ball.
-	if not should_kick:
-		var ball_speed_sq: float = ball.linear_velocity.length_squared()
-		if dist_sq < kick_on_proximity_m * kick_on_proximity_m \
-				and ball_speed_sq < (carrier_speed * 0.5) * (carrier_speed * 0.5):
-			should_kick = true
-	# Direction-change override — carrier turned, ball still rolling
-	# the old way. cos(35°) ≈ 0.819.
-	if not should_kick:
-		var ball_v: Vector3 = ball.linear_velocity
-		var ball_v_planar: Vector3 = Vector3(ball_v.x, 0.0, ball_v.z)
-		if ball_v_planar.length_squared() > 0.5 \
-				and carrier_v.length_squared() > 0.5:
-			var cos_threshold: float = cos(deg_to_rad(kick_on_direction_change_deg))
-			if carrier_v.normalized().dot(ball_v_planar.normalized()) < cos_threshold:
-				should_kick = true
-
-	if not should_kick:
-		return
-	_touch_timer_s = 0.0
-	_apply_touch_impulse(carrier_v)
-
-
-## Set ball linear velocity in the carrier's direction at a peak speed
-## that compensates for drag, so the AVERAGE speed over the upcoming
-## interval equals `carrier_speed * ball_avg_lead_factor`. Without
-## this compensation, drag bleeds the kick velocity below the
-## carrier's average over the cycle and the ball drifts BEHIND the
-## carrier after a few touches.
-##
-##   peak = carrier_speed * lead + drag * interval * 0.5
-##   integrated over interval, average = peak - drag * interval * 0.5
-##                                     = carrier_speed * lead     ✓
-func _apply_touch_impulse(carrier_v: Vector3) -> void:
-	var planar: Vector3 = Vector3(carrier_v.x, 0.0, carrier_v.z)
-	var carrier_speed: float = planar.length()
-	if carrier_speed < 0.001:
-		return
-	var carrier_dir: Vector3 = planar / carrier_speed
-	# Pick the interval matching current speed regime.
-	var interval: float = touch_interval_walk_s
-	if _carrier != null and carrier_speed > _carrier.max_walk_speed:
-		interval = touch_interval_sprint_s
-	var desired_avg: float = carrier_speed * ball_avg_lead_factor
-	var peak: float = desired_avg + drag_compensation_m_s2 * interval * 0.5
-	var new_v_xz: Vector3 = carrier_dir * peak
-	# Preserve Y component (mid-bounce, etc.).
-	new_v_xz.y = ball.linear_velocity.y
-	ball.apply_launch_state(new_v_xz)
+	var live_v: Vector3 = ball.linear_velocity
+	var alpha_v: float = 1.0 - pow(1.0 - velocity_track_strength, delta * 60.0)
+	var new_v: Vector3 = Vector3(
+		lerp(live_v.x, carrier_v.x, alpha_v),
+		live_v.y,
+		lerp(live_v.z, carrier_v.z, alpha_v),
+	)
+	ball.apply_launch_state(new_v)
 
 
 # ---- Lifecycle -----------------------------------------------------------
@@ -392,17 +317,10 @@ func _assign_carrier(player: Player) -> void:
 	# stay solid against the ball — only THIS carrier passes through.
 	ball.add_collision_exception_with(player)
 	_exception_carrier = player
-	# Prime the ball with a touch impulse RIGHT NOW if the carrier is
-	# moving AND the ball was essentially still — a player running
-	# onto a stationary ball needs frame-1 velocity-match or the
-	# loss threshold trips before the first periodic impulse can fire.
-	# Don't prime when the ball was already fast (pass receive,
-	# tackle pickup) — let the dribble loop converge naturally so the
-	# ball doesn't snap-decelerate from pass speed to walk speed.
-	if player.velocity.length() > touch_min_speed_m_s \
-			and ball.linear_velocity.length() < touch_min_speed_m_s:
-		_apply_touch_impulse(player.velocity)
-		_touch_timer_s = 0.0
+	# No prime impulse needed in continuous-tracking mode — the per-tick
+	# position+velocity lerp converges to the carry target within
+	# ~3 frames at 60 fps regardless of the initial geometry.
+	_touch_timer_s = 0.0
 
 
 func _clear_collision_exception() -> void:
