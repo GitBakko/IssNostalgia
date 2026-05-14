@@ -91,6 +91,7 @@ var team_a_shooter: ShootingController
 var team_a_passer: PassingController
 var team_b_shooter: ShootingController  ## non-null only when both_human
 var team_b_passer: PassingController
+var team_b_static_ai: StaticAI  ## non-null only when both_human == false
 var players_a: Array[Player] = []
 var players_b: Array[Player] = []
 
@@ -159,6 +160,17 @@ func _spawn_team_b() -> void:
 	team_b_ctrl.ball_ref = ball
 	team_b_ctrl.is_human = both_human
 	team_b_root.add_child(team_b_ctrl)
+	# Sprint 8 T04 — static-formation AI for the opponent side. Only
+	# spawned when Team B is NOT human-driven (both_human == false).
+	# Mirrors anchors because Team B defends the +Z goal.
+	if not both_human:
+		team_b_static_ai = StaticAI.new()
+		team_b_static_ai.name = "StaticAI"
+		team_b_static_ai.team_controller = team_b_ctrl
+		team_b_static_ai.ball_ref = ball
+		team_b_static_ai.formation = formation
+		team_b_static_ai.mirror_anchors = true
+		team_b_root.add_child(team_b_static_ai)
 
 
 func _spawn_ball_controllers() -> void:

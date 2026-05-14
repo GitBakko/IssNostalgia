@@ -152,7 +152,14 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | R02-F04 speed-modulated carry offset | _TBD T01_ | _PENDING_ |
 | R02-F05 touch-cycle (Architecture C, 1.6 m loss) | _TBD T02_ | _PENDING_ |
 | R02-F07 magnetic feel + dribble_skill + tight_control | _TBD T03_ | _PENDING_ |
-| R05-F01..F06 Static AI 2 Hz tactical, anchor + ball-attraction | _TBD T04_ | _PENDING_ |
+| R05-F01 2 Hz tactical update | `StaticAI.step` (update_hz=2.0) | APPLIED T04 |
+| R05-F02 anchor = Voronoi centroid, role-factor offset | `StaticAI.tick_targets` formula | APPLIED T04 |
+| R05-F03 role factors GK=0.1 / DEF=0.3 / MID=0.5 / ATT=0.7 | `StaticAI.ROLE_FACTOR_*` constants | APPLIED T04 |
+| R05-F04 analytical per-agent target, lerp_alpha = dt/1.5 | `Player._drive_toward_static_target` (`STATIC_TARGET_LERP_TAU_S=1.5`) | APPLIED T04 |
+| R05-F05 monotonic role gradient | `test_role_factor_gradient_is_monotonic` | APPLIED T04 |
+| R05-F06 max_reposition_speed cap 6–10 m/s by role | `StaticAI.max_reposition_speed_*` + `Player.set_static_target(pos, max_speed)` clamp | APPLIED T04 |
+| R05-F07 Temporal Voronoi (KNN 3-param) | DEFERRED → Phase 3 (per-frame cost incompatible with mobile budget) | DEFERRED |
+| R05 event-driven half-change trigger (F03 hybrid extra) | DEFERRED → Sprint 9 (T04 uses pure 2 Hz polling per spec — half-change event is an additive enhancement, plan didn't mandate) | DEFERRED |
 | R04-F01/F02/F04/F05/F06 GK reactive save + give-up gate | _TBD T05_ | _PENDING_ |
 | R04-F03 reaction delay | DEFERRED → Phase 3 | DEFERRED |
 | R09-F02 NBA Jam catch-up boost (schema-only) | _TBD T06_ | _PENDING_ |

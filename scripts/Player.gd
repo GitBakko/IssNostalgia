@@ -34,6 +34,18 @@ const STAMINA_RECOVERY_PER_SEC: float = 1.0 / 5.0
 ## Smallest squared input magnitude treated as "movement intent".
 const INPUT_DEAD_ZONE_SQ: float = 1.0e-4
 
+## S08-T04 static-AI autopilot tuning. R05-F04: `lerp_alpha = dt /
+## STATIC_TARGET_LERP_TAU_S` shapes the desired-speed envelope as
+## `dist / tau` so the player decelerates smoothly into the target.
+## R05-F06 max_reposition_speed cap is per-instance via
+## `set_static_target(pos, max_speed)`.
+const STATIC_TARGET_LERP_TAU_S: float = 1.5
+## Within this radius the autopilot considers the player arrived
+## and feeds zero input so velocity decays via the normal accel
+## ramp. 0.30 m matches the Player capsule radius (0.40) + a small
+## settling margin so successive ticks don't oscillate.
+const STATIC_TARGET_ARRIVE_RADIUS_M: float = 0.30
+
 ## Direction-input buffer was REMOVED in S08-T02-fix12 (2026-05-14).
 ## Turn-glue (BallController._apply_turn_glue) keeps the ball locked
 ## to the foot through any direction change, so the buffer's job
@@ -130,6 +142,15 @@ var _pickup_input_lock_remaining_s: float = 0.0
 ## driving input" — only the former should snap the ball to the
 ## foot for the decel match.
 var _intent_explicitly_set: bool = false
+## S08-T04 static AI autopilot state. When `_has_static_target` is
+## true and `apply_movement_step` is NOT called this tick, the
+## `_physics_process` autopilot drives toward `_static_target_pos`
+## using the R05-F04 / F06 lerp+cap envelope. Active-side overrides
+## (PlayerController, future ball-pursuit AI) clear the target via
+## `clear_static_target()` so they take precedence.
+var _has_static_target: bool = false
+var _static_target_pos: Vector3 = Vector3.ZERO
+var _static_target_max_speed: float = 0.0  ## 0 = no cap (Player defaults)
 
 
 func _ready() -> void:
@@ -249,6 +270,26 @@ func on_possession_lost() -> void:
 	_input_buffer_active = false
 	_input_buffer_remaining_s = 0.0
 	_ball_moving_with_me = false
+
+
+## S08-T04 — assign a world-space target position the player should
+## steer toward when no human / AI controller is driving them this
+## tick. `max_speed` (R05-F06) caps the velocity so a far-away
+## target doesn't read as a teleport; pass 0.0 for no cap (uses
+## the Player walk/sprint defaults). Idempotent — overwrites prior
+## target. Cleared by `clear_static_target()` or by the carrier
+## flag flipping (BallController takes priority).
+func set_static_target(pos: Vector3, max_speed: float = 0.0) -> void:
+	_has_static_target = true
+	_static_target_pos = Vector3(pos.x, 0.0, pos.z)
+	_static_target_max_speed = maxf(0.0, max_speed)
+
+
+## Stop steering to the static target — the next non-driven tick
+## will fall back to zero-input decel. Used by the active-side
+## controllers when they take over.
+func clear_static_target() -> void:
+	_has_static_target = false
 
 
 ## Public read of the latest intended input direction (planar, NOT
@@ -403,17 +444,49 @@ func start_facing_warp(direction: Vector3, duration_s: float = -1.0) -> void:
 # ---- Lifecycle ----------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
-	# If no controller drove us this tick (we're inactive — TeamController
-	# pointed elsewhere, or StaticAI hasn't woken up yet), apply a
-	# zero-input step so velocity decays naturally toward 0 instead of
-	# coasting forever. Active players are driven by their PlayerController
-	# AFTER this — but the controller's call sets _driven_this_tick = true
-	# next tick, so the active player skips this branch from then on.
+	# If no controller drove us this tick:
+	#   - has a static-AI target → steer toward it (R05 autopilot)
+	#   - otherwise → zero-input decel so the player coasts to a stop.
+	# Active controllers (PlayerController, future ball-pursuit AI)
+	# call `apply_movement_step` directly, which sets _driven_this_tick
+	# and bypasses both branches.
 	if not _driven_this_tick:
-		apply_movement_step(Vector3.ZERO, false, delta)
+		if _has_static_target:
+			_drive_toward_static_target(delta)
+		else:
+			apply_movement_step(Vector3.ZERO, false, delta)
 	update_facing(delta)
 	move_and_slide()
 	_driven_this_tick = false
+
+
+## Static-AI autopilot driver (R05-F04 lerp envelope + R05-F06 cap).
+## Computes a desired planar speed = `dist / STATIC_TARGET_LERP_TAU_S`
+## clamped to `_static_target_max_speed`, then feeds an equivalent
+## scaled input vector (and sprint flag when the desired speed
+## exceeds walk) into `apply_movement_step` so all the existing
+## stamina / accel / facing logic stays in one path.
+func _drive_toward_static_target(dt: float) -> void:
+	var to: Vector3 = _static_target_pos - global_position
+	to.y = 0.0
+	var dist: float = to.length()
+	if dist < STATIC_TARGET_ARRIVE_RADIUS_M:
+		apply_movement_step(Vector3.ZERO, false, dt)
+		return
+	var dir: Vector3 = to / dist
+	# R05-F04: desired speed envelope smoothly decelerates as the
+	# player approaches the target — at 7.5 m the speed request is
+	# 5 m/s, at 1.5 m it's 1 m/s. Combined with Player.accel this
+	# gives a settled arrival without overshoot.
+	var desired_speed: float = dist / STATIC_TARGET_LERP_TAU_S
+	# R05-F06: per-role velocity cap prevents teleport-feel on
+	# large repositions (e.g. half-change transitions).
+	if _static_target_max_speed > 0.0:
+		desired_speed = minf(desired_speed, _static_target_max_speed)
+	var sprint: bool = desired_speed > max_walk_speed
+	var max_at_speed: float = max_sprint_speed if sprint else max_walk_speed
+	var input_mag: float = clampf(desired_speed / max_at_speed, 0.0, 1.0)
+	apply_movement_step(dir * input_mag, sprint, dt)
 
 
 # ---- Internal -----------------------------------------------------------
