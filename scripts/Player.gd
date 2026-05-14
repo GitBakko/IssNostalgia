@@ -34,15 +34,16 @@ const STAMINA_RECOVERY_PER_SEC: float = 1.0 / 5.0
 ## Smallest squared input magnitude treated as "movement intent".
 const INPUT_DEAD_ZONE_SQ: float = 1.0e-4
 
-## Direction-input buffer (S08 anti-frustration system). When the
-## carrier is in possession AND the ball is moving with them, a
-## direction change > DIRECTION_BUFFER_DEAD_ZONE_DEG is BUFFERED:
-## the player's mesh rotates immediately (visual feedback), but the
-## physical velocity stays in the OLD direction until the next
-## BallController touch fires (or the buffer cap times out). Eliminates
-## the "ball lost on every turn" frustration. R01-F05 backing
-## (eFootball v2.00 patch — small direction changes don't break the
-## sprint dribble).
+## Direction-input buffer was REMOVED in S08-T02-fix12 (2026-05-14).
+## Turn-glue (BallController._apply_turn_glue) keeps the ball locked
+## to the foot through any direction change, so the buffer's job
+## (preventing "ball lost on turn") is no longer needed — and the
+## buffer was actively causing a "drift" feel where the mesh faced
+## the new direction but the body kept moving the old way until the
+## next touch fired. Velocity now tracks intended input directly.
+##
+## Constants kept for backward-compat in case some external system
+## reads them; values are inert (no longer consulted).
 const DIRECTION_BUFFER_DEAD_ZONE_DEG: float = 15.0
 const DIRECTION_BUFFER_MAX_S: float = 0.8
 
@@ -179,41 +180,19 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 		state = State.RUNNING
 
 
-## Direction-input buffer (S08 / R01-F05). Returns the direction the
-## velocity should track this tick. Bypasses the buffer when the
-## carrier doesn't have the ball OR the ball hasn't been touched yet
-## (Q4: from-rest start is immediate) OR the carrier is in a
-## SHOOTING/PASSING anim (Q8: input ignored — keeps current direction).
-func _resolve_committed_input(intended: Vector3, dt: float) -> Vector3:
-	# Q8: during shoot/pass anim, input is frozen at its prior commit.
+## Direction-input buffer was REMOVED in S08-T02-fix12. This now
+## always returns `intended` — velocity tracks the latest input
+## directly. The Q8 SHOOTING/PASSING freeze is preserved so a
+## fired shot/pass is not steered mid-animation. State variables
+## are kept assigned (some tests still read them) but no longer
+## drive any branching.
+func _resolve_committed_input(intended: Vector3, _dt: float) -> Vector3:
 	if is_busy_with_ball_action():
 		return _committed_input_dir
-	# No buffer when not carrying or before first dribble touch.
-	if not (has_ball and _ball_moving_with_me):
-		_committed_input_dir = intended
-		_input_buffer_active = false
-		_input_buffer_remaining_s = 0.0
-		return intended
-	# Buffer NOT active — check if the new input crosses the dead zone.
-	if not _input_buffer_active:
-		if _within_buffer_dead_zone(_committed_input_dir, intended):
-			# Within < 15° — pass through (Q2 dead zone).
-			_committed_input_dir = intended
-			return intended
-		# Engage the buffer — keep old direction, snapshot intended.
-		_input_buffer_active = true
-		_input_buffer_remaining_s = DIRECTION_BUFFER_MAX_S
-		return _committed_input_dir
-	# Buffer active — drain timer.
-	_input_buffer_remaining_s -= dt
-	if _input_buffer_remaining_s <= 0.0:
-		# Q7 cap timeout — flush.
-		_committed_input_dir = intended
-		_input_buffer_active = false
-		_input_buffer_remaining_s = 0.0
-		return intended
-	# Buffered — keep old direction in motion, intended waits for touch.
-	return _committed_input_dir
+	_committed_input_dir = intended
+	_input_buffer_active = false
+	_input_buffer_remaining_s = 0.0
+	return intended
 
 
 static func _within_buffer_dead_zone(a: Vector3, b: Vector3) -> bool:

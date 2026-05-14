@@ -183,143 +183,51 @@ func test_team_colour_applied_to_body_mesh() -> void:
 		"Body mesh albedo must match team primary colour")
 
 
-# ---- S08 direction-input buffer (Q1-Q8) -------------------------------
+# ---- S08 direction buffer is INERT after fix12 -----------------------
+#
+# The buffer was removed because turn-glue keeps the ball locked to
+# the foot regardless of the carrier's velocity, which makes the
+# "delay velocity to avoid losing the ball on a turn" hack
+# unnecessary AND visibly wrong (it produced a drift feel — mesh
+# faced new direction, body kept moving the old way). Velocity now
+# tracks intended input directly. Q8 SHOOTING/PASSING freeze is
+# preserved.
 
-func test_buffer_inactive_when_no_ball() -> void:
-	# No has_ball → buffer never engages; every input applies immediately.
+func test_velocity_tracks_intended_immediately_with_ball() -> void:
+	# Sharp turn while carrying — committed direction must follow
+	# intended same tick (no buffer delay).
+	player.has_ball = true
+	player.apply_movement_step(FORWARD, false, SUB_DT)
+	player.on_dribble_touch()  ## previously armed the buffer; now no-op
+	player.apply_movement_step(FORWARD, false, SUB_DT)
+	player.apply_movement_step(-FORWARD, false, SUB_DT)
+	assert_eq(player._committed_input_dir, -FORWARD,
+		"Committed direction must follow intended immediately, even mid-carry")
+	assert_false(player._input_buffer_active,
+		"Buffer flag must remain inactive after fix12")
+
+
+func test_velocity_tracks_intended_without_ball() -> void:
 	player.has_ball = false
 	player.apply_movement_step(FORWARD, false, SUB_DT)
-	# Sharp turn 180° → committed must follow intended same tick.
 	player.apply_movement_step(-FORWARD, false, SUB_DT)
 	assert_eq(player._committed_input_dir, -FORWARD,
-		"No buffer when not carrying — commit follows intended")
+		"Without ball, commit always follows intended")
 
 
-func test_buffer_inactive_until_first_dribble_touch() -> void:
-	# has_ball=true but no on_dribble_touch yet → still no buffer.
-	# (Q4: starting from rest is immediate.)
+func test_facing_target_follows_intended_input() -> void:
+	# Q1 still holds — facing tracks the latest intended direction.
 	player.has_ball = true
 	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.apply_movement_step(-FORWARD, false, SUB_DT)
-	assert_eq(player._committed_input_dir, -FORWARD,
-		"Before first touch, even with ball, input passes through")
-
-
-func test_buffer_engages_on_sharp_turn_after_first_touch() -> void:
-	# Pickup + first touch → buffer arms. Sharp turn (>15°) → committed
-	# stays at OLD direction, intended captures the new one.
-	player.has_ball = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()  ## first touch — _ball_moving_with_me = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	# Now turn 180° (well above 15° dead zone).
-	player.apply_movement_step(-FORWARD, false, SUB_DT)
-	assert_eq(player._committed_input_dir, FORWARD,
-		"Sharp-turn committed direction stays OLD until next touch")
-	assert_eq(player._intended_input_dir, -FORWARD,
-		"Intended captures the new direction immediately")
-	assert_true(player._input_buffer_active,
-		"Buffer flag must be active during turn delay")
-
-
-func test_buffer_passes_through_within_dead_zone() -> void:
-	# Direction change < 15° → no buffer (R01-F05 dead zone).
-	player.has_ball = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	# Tiny rotation: ~10° from -Z.
-	var slight: Vector3 = Vector3(sin(deg_to_rad(10.0)), 0.0, -cos(deg_to_rad(10.0)))
-	player.apply_movement_step(slight, false, SUB_DT)
-	assert_almost_eq(player._committed_input_dir.x, slight.x, 0.01,
-		"Within dead zone, committed must follow intended")
-
-
-func test_buffer_flushes_on_dribble_touch() -> void:
-	# Buffer engages on turn → next touch snapshots intended → committed
-	# updates and buffer disengages.
-	player.has_ball = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.apply_movement_step(-FORWARD, false, SUB_DT)  ## buffer engages
-	assert_true(player._input_buffer_active)
-	# Touch fires.
-	player.on_dribble_touch()
-	assert_false(player._input_buffer_active,
-		"Touch must clear the buffer flag")
-	assert_eq(player._committed_input_dir, -FORWARD,
-		"Touch snapshots latest intended into committed (Q3)")
-
-
-func test_buffer_flushes_on_possession_lost() -> void:
-	player.has_ball = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.apply_movement_step(-FORWARD, false, SUB_DT)  ## buffer engages
-	# Possession lost.
-	player.on_possession_lost()
-	assert_false(player._input_buffer_active,
-		"Possession loss must clear buffer flag")
-	assert_eq(player._committed_input_dir, -FORWARD,
-		"Possession loss snapshots intended into committed (Q7 flush)")
-
-
-func test_buffer_caps_at_max_duration() -> void:
-	# Q7: buffer caps at DIRECTION_BUFFER_MAX_S (0.8 s) even if no touch.
-	player.has_ball = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.apply_movement_step(-FORWARD, false, SUB_DT)  ## engage
-	assert_true(player._input_buffer_active)
-	# Tick well past the cap (0.8 s) without firing a touch.
-	for _i in 110:  ## 110 * 1/120 ≈ 0.916 s > 0.8 s cap
-		player.apply_movement_step(-FORWARD, false, SUB_DT)
-	assert_false(player._input_buffer_active,
-		"Buffer must auto-flush after MAX_S timeout (Q7 safety cap)")
-	assert_eq(player._committed_input_dir, -FORWARD,
-		"Cap timeout commits intended")
-
-
-func test_facing_uses_intended_during_buffer() -> void:
-	# Q1: even while velocity stays buffered, mesh facing rotates
-	# toward intended direction immediately.
-	player.has_ball = true
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	# Sharp turn — buffer engages.
 	player.apply_movement_step(-FORWARD, false, SUB_DT)
 	assert_eq(player._facing_target, -FORWARD,
-		"Facing target follows INTENDED direction during buffer (Q1)")
+		"Facing target follows intended direction immediately")
 
 
-func test_sprint_immediate_during_buffer() -> void:
-	# Q6: sprint toggle is NOT buffered, applies same tick.
-	player.has_ball = true
-	player.stamina = 1.0
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	# Engage buffer with a turn AND simultaneously start sprinting.
-	player.apply_movement_step(-FORWARD, true, SUB_DT)
-	# Velocity follows OLD direction (FORWARD = -Z) but at SPRINT speed.
-	assert_lt(player.velocity.z, 0.0,
-		"Velocity still in OLD direction (-Z) during buffer")
-	# Sprint applied — stamina drained this tick.
-	assert_lt(player.stamina, 1.0, "Sprint immediate even during buffer")
-
-
-func test_buffer_inactive_during_busy_state() -> void:
-	# Q8: during SHOOTING / PASSING anim window, input frozen — buffer
-	# never engages, committed stays at whatever it was.
+func test_busy_state_freezes_committed_direction() -> void:
+	# Q8 preserved — during SHOOTING/PASSING the prior commit is held.
 	player.has_ball = true
 	player.apply_movement_step(FORWARD, false, SUB_DT)
-	player.on_dribble_touch()
-	player.apply_movement_step(FORWARD, false, SUB_DT)
-	# Enter PASSING state — input now ignored regardless.
 	player.state = Player.State.PASSING
 	player.apply_movement_step(-FORWARD, false, SUB_DT)
 	assert_eq(player._committed_input_dir, FORWARD,
