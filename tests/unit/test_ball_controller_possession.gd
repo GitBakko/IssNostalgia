@@ -258,15 +258,12 @@ func test_receiver_keeps_facing_when_ball_at_rest() -> void:
 func test_dribble_impulse_fires_at_walk_interval() -> void:
 	# Carrier walking — after touch_interval_walk_s the BallController
 	# stages an apply_launch_state on the ball. Carrier flag remains
-	# (no release; ball is just nudged).
+	# (no release; ball is just nudged). Ball must be inside
+	# control_radius_m (1.0 m) but outside proximity radius (0.45 m).
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	# Place ball OUTSIDE the proximity-override radius (0.45 m) and
-	# give it a small velocity in the carrier direction so neither the
-	# proximity nor the direction-change override fires. Periodic
-	# timer is the only enabled trigger.
-	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	ball.global_position = Vector3(0.0, 0.11, -0.7)  ## inside control radius
 	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## same direction as carrier
 	bc._assign_carrier(p)
 	ball._pending_linear = null  ## set AFTER assign (which writes ZERO)
@@ -293,9 +290,8 @@ func test_dribble_impulse_uses_sprint_cadence_above_walk() -> void:
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
-	# Avoid the proximity / direction-change overrides — periodic timer
-	# is the only enabled trigger.
-	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	# Inside control_radius_m but outside proximity radius.
+	ball.global_position = Vector3(0.0, 0.11, -0.7)
 	ball.linear_velocity = Vector3(0.0, 0.0, -5.0)
 	bc._assign_carrier(p)
 	# set_possessed clears pending_linear to ZERO (not null) — set to
@@ -330,13 +326,13 @@ func test_proximity_override_kicks_ball_about_to_be_overtaken() -> void:
 func test_direction_change_override_aligns_ball_with_carrier() -> void:
 	# Carrier turns 90°; ball still rolling old direction. The
 	# direction-change override must fire an impulse so the ball
-	# tracks the new heading instead of lagging behind.
+	# tracks the new heading instead of lagging behind. Ball must be
+	# INSIDE control_radius_m for the kick to fire.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## carrier going +X
-	# Ball OUTSIDE proximity radius, going -Z (stale direction).
-	ball.global_position = Vector3(1.0, 0.11, -0.5)
-	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)
+	ball.global_position = Vector3(0.6, 0.11, -0.4)  ## within control_radius
+	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## stale -Z direction
 	bc._assign_carrier(p)
 	ball._pending_linear = null
 	bc.step(0.01)
@@ -345,6 +341,27 @@ func test_direction_change_override_aligns_ball_with_carrier() -> void:
 	var pending: Vector3 = ball._pending_linear as Vector3
 	assert_gt(pending.x, 0.0,
 		"Re-aligned impulse must point in the carrier's new direction (+X)")
+
+
+func test_no_kick_when_ball_outside_control_radius() -> void:
+	# Ball outside control_radius_m but inside loss_threshold — must
+	# coast freely. NO periodic kick, NO direction-change override.
+	# This is the "carrier chases escaped ball" state.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	# Ball outside control (1.0 m) but inside loss (2.0 m), going
+	# perpendicular (would otherwise trigger direction-change kick).
+	ball.global_position = Vector3(0.0, 0.11, -1.5)
+	ball.linear_velocity = Vector3(3.0, 0.0, 0.0)  ## perpendicular
+	bc._assign_carrier(p)
+	ball._pending_linear = null
+	# Tick well past any periodic interval.
+	bc.step(bc.touch_interval_walk_s + 0.1)
+	assert_eq(ball._pending_linear, null,
+		"Ball outside control_radius must coast — no kick fires")
+	assert_eq(bc.get_carrier(), p,
+		"Carrier flag preserved while ball coasts in the chase band")
 
 
 func test_dribble_skipped_when_carrier_almost_still() -> void:

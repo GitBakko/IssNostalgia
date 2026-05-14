@@ -52,14 +52,21 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## ball naturally near the player.
 @export var touch_min_speed_m_s: float = 1.0
 ## Boost factor applied to carrier velocity when kicking the ball.
-## 1.5 → ball leaves at 1.5× carrier speed, drag brings it back to
-## carrier speed in ~0.5 s, then below — producing the visible kick
-## cycle. Lower values feel "tethered"; higher values overshoot loss.
-@export var touch_velocity_factor: float = 1.5
+## 1.10 = ball leaves only 10 % faster than carrier — ball drifts
+## ahead gently and drag brings it back into reach. Higher values
+## launch the ball too far for the carrier to keep control.
+@export var touch_velocity_factor: float = 1.10
+## CONTROL RADIUS — the ball is only kicked when this close to the
+## carrier. Outside this radius (but still inside loss_threshold)
+## the ball coasts freely under drag + friction; the carrier has to
+## CHASE it to regain control. Without this gate every periodic /
+## proximity / direction-change trigger could re-launch a ball that's
+## already escaping, making the carrier feel like they never had it.
+@export var control_radius_m: float = 1.0
 ## Loss threshold (R02-F05). When the ball drifts beyond this distance
 ## from the carrier on the XZ plane, possession is automatically
-## released. Bumped to 2.0 m so the visible kick cycle (gap up to
-## ~0.7 m at peak) doesn't trip loss on minor decel asymmetries.
+## released. Must be > control_radius_m so there's a "free coast"
+## band between in-control and lost.
 @export var loss_threshold_m: float = 2.0
 ## Brief pickup lockout when possession is lost via the loss-threshold
 ## drift. Stops the carrier from instantly re-grabbing a ball still
@@ -75,9 +82,8 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## just outside the player capsule radius.
 @export var kick_on_proximity_m: float = 0.45
 ## When the angle between carrier velocity and ball velocity exceeds
-## this many degrees, fire a touch impulse IMMEDIATELY so the ball
-## tracks direction changes (without it the ball lags behind on every
-## turn — "ball drags behind player" feedback).
+## this many degrees AND ball is within control_radius_m, fire a
+## touch impulse IMMEDIATELY so the ball tracks direction changes.
 @export var kick_on_direction_change_deg: float = 35.0
 
 # ---- Exports -------------------------------------------------------------
@@ -215,12 +221,21 @@ func _tick_dribble_impulses(delta: float) -> void:
 	if carrier_speed > _carrier.max_walk_speed:
 		interval = touch_interval_sprint_s
 
+	# CONTROL-RADIUS GATE — outside this radius the ball is escaping.
+	# Don't kick it further; let the carrier chase it back into range.
+	# Without this gate, periodic / direction-change kicks fire on a
+	# ball that's already 1+ m away and re-launch it even further,
+	# producing the "carrier never has the ball" feel.
+	var dx: float = ball.global_position.x - _carrier.global_position.x
+	var dz: float = ball.global_position.z - _carrier.global_position.z
+	var dist_sq: float = dx * dx + dz * dz
+	var in_control: bool = dist_sq <= control_radius_m * control_radius_m
+	if not in_control:
+		return  ## ball escaping — don't kick, let carrier chase
+
 	var should_kick: bool = _touch_timer_s >= interval
 	# Proximity override — carrier about to step onto a slow ball.
 	if not should_kick:
-		var dx: float = ball.global_position.x - _carrier.global_position.x
-		var dz: float = ball.global_position.z - _carrier.global_position.z
-		var dist_sq: float = dx * dx + dz * dz
 		var ball_speed_sq: float = ball.linear_velocity.length_squared()
 		if dist_sq < kick_on_proximity_m * kick_on_proximity_m \
 				and ball_speed_sq < (carrier_speed * 0.5) * (carrier_speed * 0.5):
