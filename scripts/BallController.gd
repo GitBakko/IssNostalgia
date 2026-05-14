@@ -40,25 +40,33 @@ const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
 
 @export_group("Dribble impulses (S08-T02 / R02-F05 Arch B)")
-## Touch interval at WALK speed. Time between successive nudges in the
-## carrier's direction of travel.
-@export var touch_interval_walk_s: float = 0.35
-## Touch interval at SPRINT speed. Faster footstep cadence.
-@export var touch_interval_sprint_s: float = 0.25
+## Touch interval at WALK speed. ~5 Hz so the chase phase IS the
+## carry phase — without a long gap between touches the ball never
+## fully decelerates to a stop, the cycle reads as continuous rolling.
+@export var touch_interval_walk_s: float = 0.20
+## Touch interval at SPRINT speed. ~6.7 Hz cadence.
+@export var touch_interval_sprint_s: float = 0.15
 ## Minimum carrier speed to start emitting impulses. Below this the
 ## carrier is essentially still — let drag + rolling friction stop the
 ## ball naturally near the player.
 @export var touch_min_speed_m_s: float = 1.0
 ## Boost factor applied to carrier velocity when nudging the ball.
-## Slightly > 1.0 so the ball stays a touch ahead of the carrier and
-## drag can chew the boost down between impulses. R02-F04 says elite
-## carriers retain 88-95 % of sprint speed with ball — equivalent to
-## ball speed slightly ahead of the carrier on average. Default 1.10.
-@export var touch_velocity_factor: float = 1.10
+## > 1.0 so the ball runs ahead of the carrier between touches; drag
+## bleeds it back below carrier speed before the next touch fires,
+## producing the launch / chase / launch rhythm of real dribbling.
+## Tuned 2026-05-13 from 1.10 → 1.25 after the "ball decelerates and
+## stops between touches" feedback.
+@export var touch_velocity_factor: float = 1.25
 ## Loss threshold (R02-F05). When the ball drifts beyond this distance
 ## from the carrier on the XZ plane, possession is automatically
 ## released — the carrier ran past it / got tackled / lost touch.
 @export var loss_threshold_m: float = 1.6
+## Brief pickup lockout when possession is lost via the loss-threshold
+## drift. Stops the carrier from instantly re-grabbing a ball still
+## drifting away from them — the dribble must "miss" cleanly before
+## any player can re-acquire. Short enough that a recovery sprint
+## still feels responsive (~12 ticks at 120 Hz).
+@export var touch_loss_lockout_s: float = 0.1
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -161,6 +169,14 @@ func _check_loss() -> bool:
 		_clear_collision_exception()
 		_carrier = null
 		_touch_timer_s = 0.0
+		# CRITICAL: also clear BallPhysics._possessed_by — without this
+		# the ball keeps reporting is_possessed() == true and _try_pickup
+		# skips every subsequent pickup forever. Without launch override
+		# (loss is "the foot couldn't keep up", not an intentional kick).
+		ball.clear_possession()
+		# Brief pickup lockout so the carrier doesn't instantly re-grab
+		# the ball still drifting away — gives the loss feel weight.
+		_pickup_lockout_remaining_s = touch_loss_lockout_s
 		return true
 	return false
 
@@ -304,11 +320,14 @@ func _assign_carrier(player: Player) -> void:
 	ball.add_collision_exception_with(player)
 	_exception_carrier = player
 	# Prime the ball with a touch impulse RIGHT NOW if the carrier is
-	# already moving — so the ball matches their velocity from frame 1
-	# (no loss-threshold trigger from a player running over a still
-	# ball). _touch_timer_s starts at 0 so the next periodic touch
-	# fires after the full interval.
-	if player.velocity.length() > touch_min_speed_m_s:
+	# moving AND the ball was essentially still — a player running
+	# onto a stationary ball needs frame-1 velocity-match or the
+	# loss threshold trips before the first periodic impulse can fire.
+	# Don't prime when the ball was already fast (pass receive,
+	# tackle pickup) — let the dribble loop converge naturally so the
+	# ball doesn't snap-decelerate from pass speed to walk speed.
+	if player.velocity.length() > touch_min_speed_m_s \
+			and ball.linear_velocity.length() < touch_min_speed_m_s:
 		_apply_touch_impulse(player.velocity)
 		_touch_timer_s = 0.0
 

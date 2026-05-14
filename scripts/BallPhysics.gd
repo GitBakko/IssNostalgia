@@ -441,6 +441,15 @@ func get_possessor() -> Node3D:
 	return _possessed_by
 
 
+## Clear the possession flag WITHOUT staging a launch — used by
+## BallController on loss-threshold drift so the ball can be re-picked
+## up by anyone (including the same carrier who just lost it). The
+## ball keeps its current velocity; loss is "the foot couldn't keep up",
+## not "an intentional kick", so we don't override motion.
+func clear_possession() -> void:
+	_possessed_by = null
+
+
 # ---- Replay / frame-step (Sprint 5 T06) ----------------------------------
 
 ## Snapshot the live state of the body into the ring buffer. Called at

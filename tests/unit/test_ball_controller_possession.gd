@@ -332,6 +332,46 @@ func test_loss_threshold_clears_carrier() -> void:
 		"Ball beyond loss_threshold_m must clear the carrier")
 
 
+func test_loss_also_clears_ball_possessed_flag() -> void:
+	# REGRESSION: previously _check_loss cleared BallController._carrier
+	# but NOT BallPhysics._possessed_by. ball.is_possessed() stayed
+	# true forever, _try_pickup gate 2 skipped every subsequent pickup
+	# attempt, the ball became "immobile on the field" and the carrier
+	# could never re-acquire. This test locks in the synchronization.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3.ZERO
+	bc._assign_carrier(p)
+	assert_true(ball.is_possessed(), "Sanity: ball is possessed")
+	# Trigger loss by drifting the ball outside the threshold.
+	ball.global_position = Vector3(0.0, 0.11, -(bc.loss_threshold_m + 0.1))
+	bc.step(0.0)
+	assert_false(ball.is_possessed(),
+		"Loss must also clear BallPhysics._possessed_by — otherwise "
+		+ "_try_pickup blocks all re-acquisition forever")
+
+
+func test_pickup_works_after_loss_event() -> void:
+	# Full re-acquisition cycle: pickup → loss → walk back → re-pickup.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3.ZERO
+	bc._assign_carrier(p)
+	# Force loss.
+	ball.global_position = Vector3(0.0, 0.11, -(bc.loss_threshold_m + 0.1))
+	bc.step(0.0)
+	assert_null(bc.get_carrier(), "Sanity: loss fired")
+	# Drain the post-loss lockout.
+	bc.step(bc.touch_loss_lockout_s + 0.01)
+	# Bring the player adjacent to the (now stopped) ball.
+	p.global_position = ball.global_position + Vector3(0.0, 0.0, 0.5)
+	ball.linear_velocity = Vector3.ZERO
+	bc.step(0.0)
+	assert_eq(bc.get_carrier(), p,
+		"After loss + lockout drain, the player must be able to "
+		+ "re-acquire the ball")
+
+
 func test_ball_stays_unfrozen_during_possession() -> void:
 	# R02-F05 Arch B invariant: the ball is NEVER frozen while possessed.
 	bc._assign_carrier(players_a[0])
