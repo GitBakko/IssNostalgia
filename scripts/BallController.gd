@@ -40,33 +40,45 @@ const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
 
 @export_group("Dribble impulses (S08-T02 / R02-F05 Arch B)")
-## Touch interval at WALK speed. ~5 Hz so the chase phase IS the
-## carry phase — without a long gap between touches the ball never
-## fully decelerates to a stop, the cycle reads as continuous rolling.
-@export var touch_interval_walk_s: float = 0.20
-## Touch interval at SPRINT speed. ~6.7 Hz cadence.
-@export var touch_interval_sprint_s: float = 0.15
+## Touch interval at WALK speed. Long enough that the ball coasts
+## visibly between kicks (gap grows to ~0.7 m, then ball decelerates
+## and player closes the gap — visible launch / chase / launch cycle,
+## not a constant tether). Tuned 2026-05-14 after "rope-tied" feedback.
+@export var touch_interval_walk_s: float = 0.55
+## Touch interval at SPRINT speed.
+@export var touch_interval_sprint_s: float = 0.40
 ## Minimum carrier speed to start emitting impulses. Below this the
 ## carrier is essentially still — let drag + rolling friction stop the
 ## ball naturally near the player.
 @export var touch_min_speed_m_s: float = 1.0
-## Boost factor applied to carrier velocity when nudging the ball.
-## > 1.0 so the ball runs ahead of the carrier between touches; drag
-## bleeds it back below carrier speed before the next touch fires,
-## producing the launch / chase / launch rhythm of real dribbling.
-## Tuned 2026-05-13 from 1.10 → 1.25 after the "ball decelerates and
-## stops between touches" feedback.
-@export var touch_velocity_factor: float = 1.25
+## Boost factor applied to carrier velocity when kicking the ball.
+## 1.5 → ball leaves at 1.5× carrier speed, drag brings it back to
+## carrier speed in ~0.5 s, then below — producing the visible kick
+## cycle. Lower values feel "tethered"; higher values overshoot loss.
+@export var touch_velocity_factor: float = 1.5
 ## Loss threshold (R02-F05). When the ball drifts beyond this distance
 ## from the carrier on the XZ plane, possession is automatically
-## released — the carrier ran past it / got tackled / lost touch.
-@export var loss_threshold_m: float = 1.6
+## released. Bumped to 2.0 m so the visible kick cycle (gap up to
+## ~0.7 m at peak) doesn't trip loss on minor decel asymmetries.
+@export var loss_threshold_m: float = 2.0
 ## Brief pickup lockout when possession is lost via the loss-threshold
 ## drift. Stops the carrier from instantly re-grabbing a ball still
 ## drifting away from them — the dribble must "miss" cleanly before
 ## any player can re-acquire. Short enough that a recovery sprint
 ## still feels responsive (~12 ticks at 120 Hz).
 @export var touch_loss_lockout_s: float = 0.1
+## When the ball gets within this distance of the carrier AND the ball
+## is much slower than the carrier, fire a touch impulse IMMEDIATELY
+## (don't wait for the periodic timer). Without this the carrier
+## walks ONTO a stopped ball and the ball appears to disappear under
+## the capsule until the next periodic touch fires. Default 0.45 m =
+## just outside the player capsule radius.
+@export var kick_on_proximity_m: float = 0.45
+## When the angle between carrier velocity and ball velocity exceeds
+## this many degrees, fire a touch impulse IMMEDIATELY so the ball
+## tracks direction changes (without it the ball lags behind on every
+## turn — "ball drags behind player" feedback).
+@export var kick_on_direction_change_deg: float = 35.0
 
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
@@ -182,10 +194,14 @@ func _check_loss() -> bool:
 
 
 ## Periodic touch impulse (R02-F05 Architecture B / R02-F04 emergent
-## carry). Sets ball velocity to `carrier.velocity * touch_velocity_factor`
-## every `touch_interval_walk_s` (or sprint variant) while the carrier
-## is moving above the min-speed gate. Drag bleeds the impulse between
-## ticks; the carrier catches up briefly between nudges.
+## carry). Three trigger paths produce the touch:
+##   1. Periodic timer at `touch_interval_walk_s` / `touch_interval_sprint_s`
+##      — base rhythm for visible launch / chase cycle.
+##   2. Proximity override — ball about to be overtaken (carrier closing
+##      onto a slow ball). Without this the ball ends up under the
+##      capsule for the rest of the interval.
+##   3. Direction-change override — carrier velocity rotated > N degrees
+##      from ball velocity. Without this the ball lags behind on turns.
 func _tick_dribble_impulses(delta: float) -> void:
 	if _carrier == null:
 		return
@@ -195,12 +211,32 @@ func _tick_dribble_impulses(delta: float) -> void:
 		_touch_timer_s = 0.0
 		return
 	_touch_timer_s += delta
-	# Pick interval by speed regime — anything > max_walk_speed counts
-	# as sprint cadence.
 	var interval: float = touch_interval_walk_s
 	if carrier_speed > _carrier.max_walk_speed:
 		interval = touch_interval_sprint_s
-	if _touch_timer_s < interval:
+
+	var should_kick: bool = _touch_timer_s >= interval
+	# Proximity override — carrier about to step onto a slow ball.
+	if not should_kick:
+		var dx: float = ball.global_position.x - _carrier.global_position.x
+		var dz: float = ball.global_position.z - _carrier.global_position.z
+		var dist_sq: float = dx * dx + dz * dz
+		var ball_speed_sq: float = ball.linear_velocity.length_squared()
+		if dist_sq < kick_on_proximity_m * kick_on_proximity_m \
+				and ball_speed_sq < (carrier_speed * 0.5) * (carrier_speed * 0.5):
+			should_kick = true
+	# Direction-change override — carrier turned, ball still rolling
+	# the old way. cos(35°) ≈ 0.819.
+	if not should_kick:
+		var ball_v: Vector3 = ball.linear_velocity
+		var ball_v_planar: Vector3 = Vector3(ball_v.x, 0.0, ball_v.z)
+		if ball_v_planar.length_squared() > 0.5 \
+				and carrier_v.length_squared() > 0.5:
+			var cos_threshold: float = cos(deg_to_rad(kick_on_direction_change_deg))
+			if carrier_v.normalized().dot(ball_v_planar.normalized()) < cos_threshold:
+				should_kick = true
+
+	if not should_kick:
 		return
 	_touch_timer_s = 0.0
 	_apply_touch_impulse(carrier_v)

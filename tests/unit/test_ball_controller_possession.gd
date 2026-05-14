@@ -262,7 +262,12 @@ func test_dribble_impulse_fires_at_walk_interval() -> void:
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	ball.global_position = Vector3.ZERO  ## stays inside loss radius
+	# Place ball OUTSIDE the proximity-override radius (0.45 m) and
+	# give it a small velocity in the carrier direction so neither the
+	# proximity nor the direction-change override fires. Periodic
+	# timer is the only enabled trigger.
+	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## same direction as carrier
 	bc._assign_carrier(p)
 	ball._pending_linear = null  ## set AFTER assign (which writes ZERO)
 	# Pre-interval: no impulse, still carrying.
@@ -288,7 +293,10 @@ func test_dribble_impulse_uses_sprint_cadence_above_walk() -> void:
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
-	ball.global_position = Vector3.ZERO
+	# Avoid the proximity / direction-change overrides — periodic timer
+	# is the only enabled trigger.
+	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	ball.linear_velocity = Vector3(0.0, 0.0, -5.0)
 	bc._assign_carrier(p)
 	# set_possessed clears pending_linear to ZERO (not null) — set to
 	# null here so the test detects the impulse via != null.
@@ -299,6 +307,44 @@ func test_dribble_impulse_uses_sprint_cadence_above_walk() -> void:
 	bc.step(bc.touch_interval_sprint_s * 0.6)
 	assert_not_null(ball._pending_linear,
 		"Sprint cadence (touch_interval_sprint_s) must drive the impulse")
+
+
+func test_proximity_override_kicks_ball_about_to_be_overtaken() -> void:
+	# Carrier moving onto a slow ball within kick_on_proximity_m
+	# fires an immediate impulse — without it the ball ends up under
+	# the player capsule until the next periodic touch.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	# Ball within proximity radius (0.45 m), nearly stopped.
+	ball.global_position = Vector3(0.0, 0.11, -0.3)
+	ball.linear_velocity = Vector3(0.0, 0.0, -0.5)  ## << carrier_speed * 0.5
+	bc._assign_carrier(p)
+	ball._pending_linear = null
+	# A SINGLE small step — well under any periodic interval.
+	bc.step(0.01)
+	assert_not_null(ball._pending_linear,
+		"Proximity override must fire impulse immediately, not wait for timer")
+
+
+func test_direction_change_override_aligns_ball_with_carrier() -> void:
+	# Carrier turns 90°; ball still rolling old direction. The
+	# direction-change override must fire an impulse so the ball
+	# tracks the new heading instead of lagging behind.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## carrier going +X
+	# Ball OUTSIDE proximity radius, going -Z (stale direction).
+	ball.global_position = Vector3(1.0, 0.11, -0.5)
+	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)
+	bc._assign_carrier(p)
+	ball._pending_linear = null
+	bc.step(0.01)
+	assert_not_null(ball._pending_linear,
+		"Direction change > 35° must fire an immediate kick to align ball")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	assert_gt(pending.x, 0.0,
+		"Re-aligned impulse must point in the carrier's new direction (+X)")
 
 
 func test_dribble_skipped_when_carrier_almost_still() -> void:
