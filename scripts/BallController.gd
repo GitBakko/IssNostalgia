@@ -118,11 +118,14 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 @export var turn_glue_min_angle_deg: float = 0.5
 ## Carry offset along visual_forward used by the glue snap. Ball
 ## position is locked to (carrier + visual_forward * this) on every
-## turn tick. Slightly larger than kick_proximity_m so the glue
-## snap does NOT immediately satisfy the kick gate the same tick
-## (otherwise the snap would chain into a kick that scatters the
-## ball away from the foot during the turn).
-@export var turn_glue_offset_m: float = 0.40
+## turn tick. Must clear the carrier capsule (radius 0.4) + ball
+## radius (~0.11) → minimum 0.51 m, otherwise the kinematic sweep
+## of CharacterBody3D treats the snapped ball as a wall (the
+## collision exception only blocks the contact response, not the
+## visual penetration which still feels like a stop). 0.55 leaves
+## a small margin and stays well above kick_proximity_m so the
+## snap does not chain into an immediate kick.
+@export var turn_glue_offset_m: float = 0.55
 
 @export_group("Magnetic centering (R02-F03 PhysicsFC carry-zone)")
 ## Master switch. DEFAULT OFF (per playtest 2026-05-14): the
@@ -660,13 +663,16 @@ func _assign_carrier(player: Player) -> void:
 		if ball_vel.dot(to_player) > 0.0:
 			player.start_facing_warp(-ball_vel)
 	ball.set_possessed(player)
-	# Add a collision exception so the carrier can walk THROUGH the
-	# ball — without this the CharacterBody3D capsule (radius 0.4)
-	# blocks at 0.51 m from the ball centre, the carrier's velocity
-	# drops to ~0, the dribble impulse never fires (touch_min_speed
-	# gate), and the ball ends up an unmovable boulder. Other players
-	# stay solid against the ball — only THIS carrier passes through.
+	# Add a SYMMETRIC collision exception so the carrier can walk
+	# THROUGH the ball (and vice-versa). CharacterBody3D.move_and_slide
+	# uses ITS OWN exception list when sweeping motion against
+	# PhysicsBody3Ds — adding the exception only on the ball side
+	# leaves the player's kinematic sweep blocking on the ball edge,
+	# which manifests as "the player tries to turn but the ball acts
+	# as an immovable wall" (playtest 2026-05-14). Capsule r=0.4 +
+	# ball r=0.11 → contact at 0.51 m, well inside turn_glue_offset_m.
 	ball.add_collision_exception_with(player)
+	player.add_collision_exception_with(ball)
 	_exception_carrier = player
 	# No prime impulse needed in continuous-tracking mode — the per-tick
 	# position+velocity lerp converges to the carry target within
@@ -679,6 +685,7 @@ func _clear_collision_exception() -> void:
 		return
 	if is_instance_valid(_exception_carrier):
 		ball.remove_collision_exception_with(_exception_carrier)
+		(_exception_carrier as PhysicsBody3D).remove_collision_exception_with(ball)
 	_exception_carrier = null
 
 

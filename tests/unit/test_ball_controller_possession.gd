@@ -461,27 +461,33 @@ func test_ball_collision_active_during_possession() -> void:
 
 
 func test_carrier_added_to_collision_exception_on_pickup() -> void:
-	# Carrier must be in the ball's collision exception list — without
-	# this the CharacterBody3D capsule blocks at 0.51 m from the ball,
-	# the carrier's velocity drops to ~0, the dribble impulse never
-	# fires, and the ball ends up an unmovable boulder (regression
-	# observed 2026-05-13). Other players stay solid against the ball.
+	# Carrier must be in the ball's collision exception list AND vice-
+	# versa — without the SYMMETRIC pair the CharacterBody3D capsule
+	# kinematic sweep still blocks on the ball during turns (the
+	# carrier "tries to turn but the ball acts as a wall", playtest
+	# 2026-05-14). Other players stay solid against the ball.
 	bc._assign_carrier(players_a[0])
-	var exceptions: Array[PhysicsBody3D] = ball.get_collision_exceptions()
-	assert_true(players_a[0] in exceptions,
+	var ball_exc: Array[PhysicsBody3D] = ball.get_collision_exceptions()
+	assert_true(players_a[0] in ball_exc,
 		"Carrier must be in ball.get_collision_exceptions() during possession")
+	var player_exc: Array[PhysicsBody3D] = players_a[0].get_collision_exceptions()
+	assert_true(ball in player_exc,
+		"Ball must be in carrier.get_collision_exceptions() during possession")
 	# Other team players are NOT in the exception list.
 	for i in [1, 2, 3, 4]:
-		assert_false(players_a[i] in exceptions,
+		assert_false(players_a[i] in ball_exc,
 			"Non-carrier teammates must remain solid against the ball")
 
 
 func test_collision_exception_cleared_on_release() -> void:
 	bc._assign_carrier(players_a[0])
 	bc.request_release(Vector3(8.0, 0.0, 0.0))
-	var exceptions: Array[PhysicsBody3D] = ball.get_collision_exceptions()
-	assert_false(players_a[0] in exceptions,
-		"Release must remove the carrier from the exception list")
+	var ball_exc: Array[PhysicsBody3D] = ball.get_collision_exceptions()
+	assert_false(players_a[0] in ball_exc,
+		"Release must remove the carrier from the ball's exception list")
+	var player_exc: Array[PhysicsBody3D] = players_a[0].get_collision_exceptions()
+	assert_false(ball in player_exc,
+		"Release must remove the ball from the carrier's exception list")
 
 
 func test_collision_exception_cleared_on_loss() -> void:
@@ -490,9 +496,12 @@ func test_collision_exception_cleared_on_loss() -> void:
 	ball.global_position = Vector3(0.0, 0.11, -(bc.loss_threshold_m + 0.1))
 	bc.step(0.0)
 	assert_null(bc.get_carrier(), "Sanity: loss fired")
-	var exceptions: Array[PhysicsBody3D] = ball.get_collision_exceptions()
-	assert_false(players_a[0] in exceptions,
-		"Loss must remove the carrier from the exception list")
+	var ball_exc: Array[PhysicsBody3D] = ball.get_collision_exceptions()
+	assert_false(players_a[0] in ball_exc,
+		"Loss must remove the carrier from the ball's exception list")
+	var player_exc: Array[PhysicsBody3D] = players_a[0].get_collision_exceptions()
+	assert_false(ball in player_exc,
+		"Loss must remove the ball from the carrier's exception list")
 
 
 func test_pickup_with_moving_carrier_kicks_at_meet() -> void:
