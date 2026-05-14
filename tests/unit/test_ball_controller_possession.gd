@@ -648,6 +648,8 @@ func test_passive_brake_skipped_when_ball_far() -> void:
 # ---- Magnetic centering (Bug 3, circular-sweep playtest 2026-05-14) ----
 
 func test_centering_pulls_ball_toward_carry_zone() -> void:
+	# Centering is OFF by default — opt in for this test.
+	bc.centering_enabled = true
 	# Carrier moving -Z at walk speed, ball OUTSIDE proximity (0.35)
 	# but within centering radius (1.5). No kick this tick → centering
 	# must stage a velocity that pulls the ball toward the ideal
@@ -659,6 +661,8 @@ func test_centering_pulls_ball_toward_carry_zone() -> void:
 	ball.global_position = Vector3(0.0, 0.11, -1.0)  ## ahead, > proximity
 	ball.linear_velocity = Vector3(0.0, 0.0, -1.0)   ## slow drift
 	ball._pending_linear = null
+	# Establish a steady carry-dir baseline so turn-glue stays silent.
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
 	bc.step(1.0 / 60.0)
 	assert_not_null(ball._pending_linear,
 		"Centering must stage a velocity correction when ball within radius")
@@ -672,6 +676,7 @@ func test_centering_pulls_ball_toward_carry_zone() -> void:
 
 
 func test_centering_skipped_when_ball_just_kicked() -> void:
+	bc.centering_enabled = true
 	# Ball moving > centering_max_ball_speed_m_s → centering bows out
 	# and lets natural drag carry the just-kicked ball.
 	var p: Player = players_a[0]
@@ -681,12 +686,14 @@ func test_centering_skipped_when_ball_just_kicked() -> void:
 	ball.global_position = Vector3(0.0, 0.11, -1.0)
 	ball.linear_velocity = Vector3(0.0, 0.0, -bc.centering_max_ball_speed_m_s - 1.0)
 	ball._pending_linear = null
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
 	bc.step(1.0 / 60.0)
 	assert_eq(ball._pending_linear, null,
 		"Centering must skip while ball is moving faster than the speed cap")
 
 
 func test_centering_skipped_within_dead_zone() -> void:
+	bc.centering_enabled = true
 	# Ball already very close to ideal point → no jitter correction.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
@@ -697,6 +704,7 @@ func test_centering_skipped_within_dead_zone() -> void:
 	ball.global_position = Vector3(0.0, 0.11, -bc.centering_offset_m)
 	ball.linear_velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
 	ball._pending_linear = null
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
 	bc.step(1.0 / 60.0)
 	# Within dead-zone OR proximity (0.35 m → kick fires). Either way the
 	# behavior is deterministic and not the centering pull. We only assert
@@ -720,44 +728,41 @@ func test_centering_skipped_within_dead_zone() -> void:
 
 # ---- Turn-glue (Bug 4, "ball must rotate with carrier on turn") --------
 
-func test_turn_glue_rotates_ball_around_carrier() -> void:
-	# Carrier moving +X with ball at (0.4, *, 0) (right of carrier).
-	# Carrier rotates carry direction to +Z (90° turn). Ball must
-	# rotate to (0, *, 0.4) — same offset distance, new heading.
-	# Capped at turn_glue_max_angle_per_tick_deg per tick (12° default),
-	# so the rotation snap covers `cap` degrees this tick, not the full
-	# 90°. Both _pending_teleport and _pending_linear must be staged.
+func test_turn_glue_snaps_ball_to_foot_in_new_heading() -> void:
+	# Carrier moving +X, then rotates visual to +Z. Turn-glue must
+	# HARD-SNAP the ball to (carrier + visual_forward * turn_glue_offset_m)
+	# and match carrier velocity. No interpolation, no per-tick cap —
+	# the ball is glued to the foot for that tick.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)
 	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(1, 0, 0), Vector3.UP)
 	bc._assign_carrier(p)
-	# Establish carry-dir baseline at +X with one tick.
-	ball.global_position = Vector3(0.4, 0.11, 0.0)  ## inside turn_glue_radius
-	ball.linear_velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## moving +X with carrier
+	ball.global_position = Vector3(0.4, 0.11, 0.0)
+	ball.linear_velocity = Vector3(p.max_walk_speed, 0.0, 0.0)
 	ball._pending_linear = null
 	ball._pending_teleport = null
 	bc._last_carry_dir = Vector3(1.0, 0.0, 0.0)  ## baseline = +X
-	# Now the carrier turns to +Z.
+	# Now rotate visual to +Z; velocity also turns to +Z.
 	p.velocity = Vector3(0.0, 0.0, p.max_walk_speed)
 	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(0, 0, 1), Vector3.UP)
 	bc.step(1.0 / 60.0)
 	assert_not_null(ball._pending_teleport,
-		"Turn-glue must stage a position teleport when carrier rotates")
+		"Turn-glue must teleport the ball on visual rotation")
 	assert_not_null(ball._pending_linear,
-		"Turn-glue must stage a velocity rotation alongside the teleport")
+		"Turn-glue must match carrier velocity on the same tick")
 	var teleport: Vector3 = ball._pending_teleport as Vector3
-	# Cap is 12°: rotated +X by +12° (since +X→+Z is +90° in atan2 terms,
-	# actually atan2(0,1)=0 → atan2(1,0)=π/2 = +90°, so dtheta = +90°,
-	# capped to +12°). Rotation matrix on (0.4, 0): new_x = 0.4*cos(12°)
-	# ≈ 0.391, new_z = 0.4*sin(12°) ≈ 0.083. Ball must move toward +Z
-	# while x decreases slightly.
-	assert_lt(teleport.x, 0.4, "Ball X should decrease (rotated toward +Z)")
-	assert_gt(teleport.z, 0.0, "Ball Z should increase (rotated toward +Z)")
-	# Distance from carrier preserved (rotation doesn't change radius).
-	var radius: float = sqrt(teleport.x * teleport.x + teleport.z * teleport.z)
-	assert_almost_eq(radius, 0.4, 0.01,
-		"Turn-glue rotation must preserve ball distance from carrier")
+	# Hard snap: ball at (0, *, turn_glue_offset_m) — directly in front
+	# of the player along +Z (the new visual_forward).
+	assert_almost_eq(teleport.x, 0.0, 0.001,
+		"Ball X must snap to ~0 (no carry along old +X heading)")
+	assert_almost_eq(teleport.z, bc.turn_glue_offset_m, 0.001,
+		"Ball Z must snap to turn_glue_offset_m along new +Z heading")
+	var staged_v: Vector3 = ball._pending_linear as Vector3
+	assert_almost_eq(staged_v.x, p.velocity.x, 0.001,
+		"Staged velocity X must match carrier")
+	assert_almost_eq(staged_v.z, p.velocity.z, 0.001,
+		"Staged velocity Z must match carrier")
 
 
 func test_turn_glue_skipped_when_ball_outside_radius() -> void:
