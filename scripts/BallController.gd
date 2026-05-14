@@ -39,22 +39,32 @@ const PICKUP_RADIUS_SQ: float = PICKUP_RADIUS_M * PICKUP_RADIUS_M
 const PICKUP_MAX_BALL_SPEED: float = 12.0
 const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_SPEED
 
-@export_group("Dribble — continuous tracking (R02-F05 Arch C / R02-F03)")
-## Target distance ahead of the carrier (along visual forward) where
-## the ball should sit during possession. Effectively "at the foot".
-@export var carry_distance_m: float = 0.45
-## How aggressively the ball position tracks the carry target each
-## frame. 0 = no tracking (free physics), 1 = snap. 0.5 = converges
-## in ~3 frames at 60 fps. FR-independent.
-@export_range(0.0, 1.0, 0.01) var position_track_strength: float = 0.45
-## How aggressively the ball velocity matches the carrier velocity.
-## Same scale as position_track_strength.
-@export_range(0.0, 1.0, 0.01) var velocity_track_strength: float = 0.65
-## Loss threshold — only triggers when something physical pushes the
-## ball this far away (Sprint 9+ tackle). Continuous tracking keeps
-## the ball at carry_distance_m under normal play, so this is a
-## SAFETY rail, not the primary loss mechanism.
-@export var loss_threshold_m: float = 2.5
+@export_group("Dribble — geometric proximity kick (R02-F05 Arch B feel)")
+## When the carrier's body reaches the ball's position (XZ distance
+## under this), a TOUCH fires — kicks the ball forward at carrier
+## velocity * kick_factor. This is the geometric analog of "foot
+## reaches ball" — no periodic timer, the cycle length emerges from
+## drag + carrier speed (real football: kick → coast → catch up → kick).
+@export var kick_proximity_m: float = 0.35
+## Boost factor on the carrier velocity. > 1 = ball outruns carrier
+## briefly between kicks. 1.10 = 10 % boost, ball flies ~1-2 m
+## before drag brings it back below carrier speed. Lower = tighter
+## control, higher = looser dribble.
+@export var kick_velocity_factor: float = 1.10
+## Brief lockout after each kick — prevents the same physics tick
+## from firing the kick twice in a row (kick → ball still inside
+## proximity for a frame → would re-fire). 0.05 s = 6 ticks @ 120 Hz,
+## enough for the ball to clear the proximity radius at any kick speed.
+@export var kick_lockout_s: float = 0.05
+## Minimum carrier speed to fire a kick. Below this, the carrier is
+## essentially stopped and the ball just sits at its feet (drag will
+## stop any prior motion).
+@export var kick_min_carrier_speed_m_s: float = 0.5
+## Loss threshold — ball drifts beyond this from the carrier on the
+## XZ plane → carrier flag cleared. Generous since the natural cycle
+## keeps the ball within ~1-2 m at all times; this is a safety rail
+## for hard-turn / tackle (Sprint 9+) scenarios.
+@export var loss_threshold_m: float = 3.0
 ## Brief pickup lockout when possession is lost.
 @export var touch_loss_lockout_s: float = 0.1
 
@@ -85,7 +95,7 @@ var _carrier: Player = null
 var _ordered_teams: Array[TeamController] = []
 var _last_log_pickup_dist_sq: float = INF
 var _pickup_lockout_remaining_s: float = 0.0
-var _touch_timer_s: float = 0.0
+var _kick_lockout_remaining_s: float = 0.0
 ## Player currently in the ball's collision-exception list (the only
 ## one that can "walk through" the ball). Tracked here so we can
 ## remove the exception cleanly on release / loss.
@@ -122,7 +132,7 @@ func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
 	_clear_collision_exception()
 	_carrier = null
 	_pickup_lockout_remaining_s = post_release_lockout_s
-	_touch_timer_s = 0.0
+	_kick_lockout_remaining_s = 0.0
 	ball.release(velocity, angular)
 
 
@@ -158,7 +168,7 @@ func _check_loss() -> bool:
 		_clear_carrier_flag()
 		_clear_collision_exception()
 		_carrier = null
-		_touch_timer_s = 0.0
+		_kick_lockout_remaining_s = 0.0
 		# CRITICAL: also clear BallPhysics._possessed_by — without this
 		# the ball keeps reporting is_possessed() == true and _try_pickup
 		# skips every subsequent pickup forever. Without launch override
@@ -171,51 +181,52 @@ func _check_loss() -> bool:
 	return false
 
 
-## Continuous dribble tracking (R02-F05 Architecture C + R02-F03
-## "ball target-follows player at a blend of velocities"). EVERY
-## physics tick during possession:
-##   1. Compute carry target = carrier_position + visual_forward * carry_distance_m.
-##   2. Lerp ball.global_position toward carry_target (FR-independent).
-##   3. Lerp ball.linear_velocity (XZ) toward carrier.velocity
-##      (FR-independent).
-##   4. Y position / velocity preserved (gravity + bounce still own them).
+## Geometric proximity-kick dribble (R02-F05 Architecture B feel,
+## emergent rhythm per R02-F04 + R02-F03). Each tick:
+##   - If the carrier's body has reached the ball (XZ distance under
+##     kick_proximity_m) AND no kick lockout AND carrier moving →
+##     fire a touch: ball.velocity = carrier.velocity * kick_factor.
+##   - Otherwise: nothing. Ball coasts under live physics (drag,
+##     friction, bounce). Carrier moves freely. The two will meet
+##     again when the carrier closes the gap to the slowing ball.
 ##
-## No periodic kicks. No "launch from far ahead" because the ball is
-## ALWAYS at the foot. Turning is instant because position tracking
-## follows the visual basis the moment it rotates.
-##
-## SHOOT/PASS still go through `request_release` which clears the
-## carrier and stages a launch velocity — the tracking system disengages
-## and the ball flies free.
+## NO position copy. NO continuous tracking. NO periodic timer.
+## The cycle length emerges from drag + carrier speed:
+##   walk (5.5 m/s, factor 1.10): cycle ≈ 0.22 s, flight ≈ 1.2 m
+##   sprint (8 m/s, factor 1.10): cycle ≈ 0.32 s, flight ≈ 2.5 m
+## Producing the visible "lancia → rincorri → lancia" rhythm of
+## real football dribbling. Ball is kicked AT the foot (the kick
+## fires when foot reaches ball), not from far ahead.
 func _tick_dribble_impulses(delta: float) -> void:
 	if _carrier == null:
 		return
-	var fwd: Vector3 = _carrier.get_visual_forward()
-	# Carry target — XZ on the pitch plane, Y preserved from the live
-	# ball (gravity + bounce still own vertical motion).
-	var live_pos: Vector3 = ball.global_position
-	var carry_target: Vector3 = _carrier.global_position + fwd * carry_distance_m
-	carry_target.y = live_pos.y
-	# FR-independent lerp alpha — `1 - (1 - strength)^(delta * 60)`.
-	# At strength = 0.5, alpha at 60 fps = 0.5; at 120 fps each frame
-	# applies the equivalent slice.
-	var alpha_pos: float = 1.0 - pow(1.0 - position_track_strength, delta * 60.0)
-	var new_pos: Vector3 = live_pos.lerp(carry_target, alpha_pos)
-	# Apply position via direct write — ball is unfrozen but live.
-	# Direct global_position writes on a non-frozen RigidBody3D ARE
-	# permitted in Godot 4 and skip the staged-pending pipeline.
-	ball.global_position = new_pos
-
-	# Velocity tracking — XZ matches carrier; Y preserved.
+	if _kick_lockout_remaining_s > 0.0:
+		_kick_lockout_remaining_s = maxf(0.0, _kick_lockout_remaining_s - delta)
+	if _kick_lockout_remaining_s > 0.0:
+		return
 	var carrier_v: Vector3 = _carrier.velocity
-	var live_v: Vector3 = ball.linear_velocity
-	var alpha_v: float = 1.0 - pow(1.0 - velocity_track_strength, delta * 60.0)
-	var new_v: Vector3 = Vector3(
-		lerp(live_v.x, carrier_v.x, alpha_v),
-		live_v.y,
-		lerp(live_v.z, carrier_v.z, alpha_v),
-	)
-	ball.apply_launch_state(new_v)
+	var carrier_speed: float = carrier_v.length()
+	if carrier_speed < kick_min_carrier_speed_m_s:
+		return  ## carrier still — no kick, ball settles via friction
+	# Geometric trigger: carrier body reached the ball position.
+	var dx: float = ball.global_position.x - _carrier.global_position.x
+	var dz: float = ball.global_position.z - _carrier.global_position.z
+	if dx * dx + dz * dz > kick_proximity_m * kick_proximity_m:
+		return  ## not yet at the ball — let carrier chase
+	# FIRE THE KICK — ball gets carrier_v * factor. Uses carrier
+	# velocity direction (not ball direction) so ball always flies
+	# in the player's current heading, even on hard turns.
+	_apply_proximity_kick(carrier_v)
+	_kick_lockout_remaining_s = kick_lockout_s
+
+
+func _apply_proximity_kick(carrier_v: Vector3) -> void:
+	var planar: Vector3 = Vector3(carrier_v.x, 0.0, carrier_v.z)
+	if planar.length_squared() < 0.01:
+		return
+	var target: Vector3 = planar * kick_velocity_factor
+	target.y = ball.linear_velocity.y  ## preserve Y (mid-bounce)
+	ball.apply_launch_state(target)
 
 
 # ---- Lifecycle -----------------------------------------------------------
@@ -320,7 +331,7 @@ func _assign_carrier(player: Player) -> void:
 	# No prime impulse needed in continuous-tracking mode — the per-tick
 	# position+velocity lerp converges to the carry target within
 	# ~3 frames at 60 fps regardless of the initial geometry.
-	_touch_timer_s = 0.0
+	_kick_lockout_remaining_s = 0.0
 
 
 func _clear_collision_exception() -> void:

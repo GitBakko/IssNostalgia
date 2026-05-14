@@ -146,70 +146,96 @@ func test_human_team_wins_simultaneous_pickup() -> void:
 		"Human team A must win tie against AI team B (S06-D03)")
 
 
-# ---- S08-T02 continuous dribble tracking (R02-F05 Arch C) -------------
+# ---- S08-T02 geometric proximity-kick dribble (R02-F05 Arch B feel) ----
 
-func test_position_tracks_carry_target() -> void:
-	# Architecture C: each tick the ball position lerps toward
-	# carrier_position + visual_forward * carry_distance_m. After
-	# enough ticks the ball must converge to that target on the XZ
-	# plane, regardless of where it started.
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3.ZERO
-	# Default visual forward = -Z (Basis.IDENTITY's -Z).
-	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
-	ball.global_position = Vector3(2.0, 0.11, 1.5)  ## arbitrary start
-	bc._assign_carrier(p)
-	for _i in 30:  ## ~0.5 s at 60 fps
-		bc.step(1.0 / 60.0)
-	# Expected target: 0.45 m in -Z direction from origin.
-	assert_almost_eq(ball.global_position.x, 0.0, 0.05,
-		"Ball must converge to carry target X (= carrier.x)")
-	assert_almost_eq(ball.global_position.z, -bc.carry_distance_m, 0.05,
-		"Ball must converge to carry target Z (= -carry_distance_m)")
-
-
-func test_velocity_tracks_carrier_velocity() -> void:
-	# Ball XZ velocity is staged toward carrier velocity each tick via
-	# the BallPhysics pending pipeline. In real runtime the integrator
-	# consumes _pending_linear → ball.linear_velocity converges to
-	# carrier velocity. Tests don't run physics, so we assert the
-	# staged value (_pending_linear) directly.
+func test_kick_fires_on_proximity_meet() -> void:
+	# Carrier moving + ball within kick_proximity_m → kick fires
+	# immediately (no timer). The fired velocity = carrier velocity ×
+	# kick_velocity_factor in carrier direction.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	ball.global_position = Vector3(0.0, 0.11, -0.45)
+	# Ball at carrier position (well within proximity).
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
 	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
+	# Reset pending so we detect the new kick stage.
+	ball._pending_linear = null
 	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_linear,
+		"Carrier-meets-ball proximity must fire a kick immediately")
 	var pending: Vector3 = ball._pending_linear as Vector3
-	# After 1 tick at strength 0.65, alpha = 0.65; ball v staged at
-	# lerp(0, -5.5, 0.65) ≈ -3.575.
-	assert_lt(pending.z, -2.0,
-		"Velocity tracker must stage a strong move toward carrier velocity")
+	var expected_speed: float = p.velocity.length() * bc.kick_velocity_factor
+	assert_almost_eq(Vector2(pending.x, pending.z).length(), expected_speed, 1.0e-2,
+		"Kick speed = carrier_speed * kick_velocity_factor")
 
 
-func test_position_tracking_preserves_y() -> void:
-	# Ball Y position must NOT be touched by the tracker — gravity +
-	# bounce own vertical motion.
+func test_no_kick_when_carrier_far_from_ball() -> void:
+	# Ball outside kick_proximity_m → no kick. Ball coasts under
+	# free physics; carrier must close the gap to trigger one.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
-	p.velocity = Vector3.ZERO
-	ball.global_position = Vector3(0.5, 0.5, -0.3)  ## elevated
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	# Ball OUTSIDE proximity radius (0.35 m) but inside loss (3.0 m).
+	ball.global_position = Vector3(0.0, 0.11, -1.0)
+	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)
+	bc._assign_carrier(p)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_eq(ball._pending_linear, null,
+		"Ball outside kick_proximity_m must NOT trigger a kick")
+
+
+func test_no_kick_when_carrier_almost_still() -> void:
+	# Carrier speed below kick_min_carrier_speed_m_s → no kick fires
+	# even when the ball is at the foot. Ball just sits there.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -bc.kick_min_carrier_speed_m_s * 0.5)
+	ball.global_position = Vector3(0.0, 0.11, -0.1)  ## within proximity
 	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
+	ball._pending_linear = null
 	bc.step(1.0 / 60.0)
-	assert_almost_eq(ball.global_position.y, 0.5, 1.0e-3,
-		"Tracker must NOT modify ball Y position")
+	assert_eq(ball._pending_linear, null,
+		"Carrier almost still → no kick even at foot proximity")
 
 
-func test_legacy_no_position_copy_when_not_carried() -> void:
-	# Sanity: when nobody carries the ball, the tracker is silent.
-	var initial_pos: Vector3 = Vector3(2.0, 0.11, 1.5)
-	ball.global_position = initial_pos
+func test_kick_lockout_prevents_double_fire() -> void:
+	# After one kick, the lockout must prevent a second kick on the
+	# very next tick (ball still within proximity for 1-2 frames).
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
+	bc._assign_carrier(p)
+	bc.step(1.0 / 60.0)  ## first kick
+	ball._pending_linear = null
+	# Same tick again — lockout must block.
 	bc.step(1.0 / 60.0)
-	assert_eq(ball.global_position, initial_pos,
-		"No carrier → tracker must not move the ball")
+	assert_eq(ball._pending_linear, null,
+		"kick_lockout_s must block a second kick within the lockout window")
+
+
+func test_kick_uses_carrier_direction_after_turn() -> void:
+	# Carrier turns, ball still rolling old direction. When carrier
+	# meets the ball, the kick fires in the NEW carrier direction —
+	# letting the dribble change heading instantly.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## now going +X
+	ball.global_position = Vector3(0.1, 0.11, 0.0)  ## within proximity
+	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## was going -Z
+	bc._assign_carrier(p)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_linear)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	# Kick must be primarily +X (new direction), not -Z (old ball v).
+	assert_gt(pending.x, 0.0,
+		"Post-turn kick must use carrier's NEW direction (+X)")
+	assert_almost_eq(pending.z, 0.0, 0.01,
+		"Post-turn kick has no Z component (carrier is going pure +X)")
 
 
 # ---- release proxy ------------------------------------------------------
@@ -301,39 +327,20 @@ func test_receiver_keeps_facing_when_ball_at_rest() -> void:
 
 # ---- S08-T02 dribble impulse model (R02-F05 Architecture B) ------------
 
-func test_carrier_still_ball_settles_at_carry_target() -> void:
-	# Carrier stationary → ball converges to carry_target (0.45 m
-	# in carrier visual_forward) and STAYS there with near-zero
-	# velocity (drag/friction will damp any residual).
+func test_carrier_still_does_not_move_ball() -> void:
+	# Proximity-kick model: carrier stationary → no kick. Ball stays
+	# wherever physics put it.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3.ZERO
-	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
-	ball.global_position = Vector3(2.0, 0.11, 1.0)
+	ball.global_position = Vector3(0.1, 0.11, 0.0)  ## within proximity
 	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	for _i in 60:  ## ~1 s
+	ball._pending_linear = null
+	for _i in 60:
 		bc.step(1.0 / 60.0)
-	assert_almost_eq(ball.global_position.x, 0.0, 0.05)
-	assert_almost_eq(ball.global_position.z, -bc.carry_distance_m, 0.05)
-
-
-func test_position_tracks_carrier_visual_facing() -> void:
-	# Rotate carrier visual basis 90° → carry target rotates with it.
-	var p: Player = players_a[0]
-	p.global_position = Vector3.ZERO
-	p.velocity = Vector3.ZERO
-	# Visual forward = +X (rotate basis 90° clockwise around Y → -Z
-	# becomes +X). Use looking_at to face +X direction.
-	var vr: Node3D = p.get_node(^"VisualRoot")
-	vr.transform.basis = Basis.looking_at(Vector3(1.0, 0.0, 0.0), Vector3.UP)
-	ball.global_position = Vector3(0.0, 0.11, 0.0)
-	ball.linear_velocity = Vector3.ZERO
-	bc._assign_carrier(p)
-	for _i in 30:
-		bc.step(1.0 / 60.0)
-	assert_almost_eq(ball.global_position.x, bc.carry_distance_m, 0.05,
-		"Ball must converge along visual +X when carrier faces +X")
+	assert_eq(ball._pending_linear, null,
+		"Stationary carrier must NOT kick the ball")
 
 
 func test_loss_threshold_clears_carrier() -> void:
@@ -444,27 +451,22 @@ func test_collision_exception_cleared_on_loss() -> void:
 		"Loss must remove the carrier from the exception list")
 
 
-func test_pickup_with_moving_carrier_converges_via_tracking() -> void:
-	# Continuous tracking handles the "running onto a still ball"
-	# scenario without an explicit prime impulse — within a few frames
-	# the ball's position and velocity match the carry target.
+func test_pickup_with_moving_carrier_kicks_at_meet() -> void:
+	# Pickup-while-moving scenario: carrier walks onto a still ball.
+	# Pickup fires when carrier within 0.8 m. Then a kick fires when
+	# carrier within kick_proximity_m (0.35 m).
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
-	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
-	ball.global_position = Vector3(0.0, 0.11, 0.0)
+	# Start ball at carrier position so the proximity gate is satisfied
+	# the first time the kick logic runs.
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
 	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	# A few ticks at 60 fps to converge.
-	for _i in 20:
-		bc.step(1.0 / 60.0)
-	# Position converged to carry target.
-	assert_almost_eq(ball.global_position.z, -bc.carry_distance_m, 0.1)
-	# Velocity tracker has staged a value close to carrier velocity
-	# (read pending; physics doesn't run in tests).
-	var pending: Vector3 = ball._pending_linear as Vector3
-	assert_lt(pending.z, -3.0,
-		"Velocity tracker must stage strong move toward carrier velocity")
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_linear,
+		"First kick fires once carrier reaches the ball at proximity")
 
 
 func test_shoot_release_still_arms_lockout() -> void:
