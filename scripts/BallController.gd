@@ -313,12 +313,21 @@ func _tick_dribble_impulses(delta: float) -> void:
 		_apply_passive_brake(delta)
 		_last_carry_dir = Vector3.ZERO  ## reset turn-glue baseline
 		return
-	# Turn-glue first: if the carrier's visual_forward rotated this
-	# tick AND the ball is at the foot, hard-snap the ball to the
-	# foot zone in the new heading and match carrier velocity.
-	# Returning true skips the kick + centering paths so the snap
-	# doesn't immediately scatter the ball back out (per playtest
-	# 2026-05-14 — turn must look exactly glued, no smoothing).
+	# Stop-glue: when the carrier's input intent is ZERO (stop
+	# pressed/released), snap the ball to the foot and match the
+	# carrier's instantaneous velocity. Both decel together via
+	# Player.accel until carrier_speed crosses kick_min, at which
+	# point the passive brake takes over and the ball stops with
+	# the player. Without this the ball coasts on its last kick
+	# velocity and drifts ahead during the deceleration window.
+	if _apply_stop_glue(carrier_v, carrier_speed):
+		return
+	# Turn-glue: if the carrier's visual_forward rotated this tick
+	# AND the ball is at the foot, hard-snap the ball to the foot
+	# zone in the new heading and match carrier velocity. Returning
+	# true skips the kick + centering paths so the snap doesn't
+	# immediately scatter the ball back out (per playtest 2026-05-14
+	# — turn must look exactly glued, no smoothing).
 	if _apply_turn_glue(carrier_v, carrier_speed):
 		return
 	# Geometric trigger: carrier body reached the ball position.
@@ -407,6 +416,42 @@ func _apply_turn_glue(carrier_v: Vector3, _carrier_speed: float) -> bool:
 	ball.apply_launch_state(Vector3(carrier_v.x,
 		ball.linear_velocity.y, carrier_v.z))
 	_last_carry_dir = fwd_now
+	return true
+
+
+## Stop-glue — when the carrier's INPUT intent is ZERO (the player
+## let go of the move stick / keys), the ball is locked to the foot
+## with velocity matching the carrier's instantaneous velocity. As
+## the carrier decelerates via Player.accel toward zero, the ball
+## decelerates the same way; once carrier_speed drops below
+## `kick_min_carrier_speed_m_s` the passive brake snaps both to a
+## clean stop. Returning true skips the kick + centering + turn-
+## glue paths so the lock isn't undone.
+##
+## Gates: turn_glue_enabled (shares the master switch), ball within
+## `turn_glue_radius_m`, carrier exposes `get_intended_input_dir()`.
+func _apply_stop_glue(carrier_v: Vector3, _carrier_speed: float) -> bool:
+	if not turn_glue_enabled or _carrier == null or ball == null:
+		return false
+	if not _carrier.has_method("is_stop_intent_active"):
+		return false
+	if not _carrier.is_stop_intent_active():
+		return false  ## carrier still pushing a direction, not stopping
+	var p_pos: Vector3 = _carrier.global_position
+	var b_pos: Vector3 = ball.global_position
+	var rel_x: float = b_pos.x - p_pos.x
+	var rel_z: float = b_pos.z - p_pos.z
+	if rel_x * rel_x + rel_z * rel_z > turn_glue_radius_m * turn_glue_radius_m:
+		return false
+	var fwd: Vector3 = _carrier.get_visual_forward()
+	if fwd.length_squared() < 0.001:
+		return false
+	var ideal_x: float = p_pos.x + fwd.x * turn_glue_offset_m
+	var ideal_z: float = p_pos.z + fwd.z * turn_glue_offset_m
+	ball.teleport_to(Vector3(ideal_x, b_pos.y, ideal_z))
+	ball.apply_launch_state(Vector3(carrier_v.x,
+		ball.linear_velocity.y, carrier_v.z))
+	_last_carry_dir = fwd  ## keep turn-glue baseline aligned
 	return true
 
 
@@ -662,6 +707,11 @@ func _assign_carrier(player: Player) -> void:
 		to_player.y = 0.0
 		if ball_vel.dot(to_player) > 0.0:
 			player.start_facing_warp(-ball_vel)
+			# Reception input-lock window — direction input is held to
+			# the warp target while the receive animation plays. Same
+			# duration as the visual warp so they end together.
+			if player.has_method("start_pickup_input_lock"):
+				player.start_pickup_input_lock()
 	ball.set_possessed(player)
 	# Add a SYMMETRIC collision exception so the carrier can walk
 	# THROUGH the ball (and vice-versa). CharacterBody3D.move_and_slide

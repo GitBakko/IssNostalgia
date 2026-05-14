@@ -117,6 +117,19 @@ var _input_buffer_remaining_s: float = 0.0
 ## ball — buffer engages only from this point on, so the initial
 ## "starting from rest" input applies immediately (Q4).
 var _ball_moving_with_me: bool = false
+## Pickup input-lock window (S08-T02-fix13). When > 0, direction
+## input is overridden — committed direction is forced toward
+## `_facing_target` (= the warp direction toward the incoming ball
+## set by `start_facing_warp` on pickup). Lets the receive
+## animation read as a brief "settling" before the player can
+## redirect. Drained inside `_resolve_committed_input`.
+var _pickup_input_lock_remaining_s: float = 0.0
+## True once `apply_movement_step` has run at least once. Lets
+## BallController's stop-glue distinguish "carrier actively let go
+## of input" from "test code set velocity directly without ever
+## driving input" — only the former should snap the ball to the
+## foot for the decel match.
+var _intent_explicitly_set: bool = false
 
 
 func _ready() -> void:
@@ -137,6 +150,7 @@ func _ready() -> void:
 ## tick coupling.
 func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> void:
 	_driven_this_tick = true
+	_intent_explicitly_set = true
 	# Capture INTENDED input (planar) — drives facing immediately and
 	# is the snapshot read by the buffer on the next touch.
 	_intended_input_dir = Vector3(input_dir.x, 0.0, input_dir.z)
@@ -182,13 +196,24 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 
 ## Direction-input buffer was REMOVED in S08-T02-fix12. This now
 ## always returns `intended` — velocity tracks the latest input
-## directly. The Q8 SHOOTING/PASSING freeze is preserved so a
-## fired shot/pass is not steered mid-animation. State variables
-## are kept assigned (some tests still read them) but no longer
-## drive any branching.
-func _resolve_committed_input(intended: Vector3, _dt: float) -> Vector3:
+## directly. Two exceptions:
+##   - Q8 SHOOTING/PASSING freeze (mid-animation lock).
+##   - Pickup input lock window (fix13) — for the first
+##     ~`facing_warp_duration_s` after pickup, committed direction
+##     is forced toward `_facing_target` so the player visibly
+##     "settles" with the ball before the next input redirects.
+func _resolve_committed_input(intended: Vector3, dt: float) -> Vector3:
 	if is_busy_with_ball_action():
 		return _committed_input_dir
+	if _pickup_input_lock_remaining_s > 0.0:
+		_pickup_input_lock_remaining_s = maxf(0.0,
+			_pickup_input_lock_remaining_s - dt)
+		var locked: Vector3 = _facing_target
+		if locked.length_squared() > INPUT_DEAD_ZONE_SQ:
+			_committed_input_dir = locked
+			_input_buffer_active = false
+			_input_buffer_remaining_s = 0.0
+			return locked
 	_committed_input_dir = intended
 	_input_buffer_active = false
 	_input_buffer_remaining_s = 0.0
@@ -224,6 +249,37 @@ func on_possession_lost() -> void:
 	_input_buffer_active = false
 	_input_buffer_remaining_s = 0.0
 	_ball_moving_with_me = false
+
+
+## Public read of the latest intended input direction (planar, NOT
+## normalized). ZERO = "stop intent" — but only meaningful when
+## `is_stop_intent_active()` confirms the intent was explicitly
+## driven (vs. uninitialized test fixtures).
+func get_intended_input_dir() -> Vector3:
+	return Vector3(_intended_input_dir.x, 0.0, _intended_input_dir.z)
+
+
+## True when the carrier has explicitly released input (stick / keys
+## centered). Used by BallController's stop-glue so the ball locks
+## to the foot ONLY during a real "I want to stop" deceleration,
+## not when test code sets `velocity` directly without ever calling
+## `apply_movement_step`.
+func is_stop_intent_active() -> bool:
+	if not _intent_explicitly_set:
+		return false
+	return _intended_input_dir.length_squared() < 1.0e-4
+
+
+## Arm a pickup input-lock window. While the lock drains, direction
+## input is overridden — committed direction follows `_facing_target`
+## (which BallController sets toward the incoming ball via
+## `start_facing_warp`). Defaults to `facing_warp_duration_s` so the
+## input lock and the visual warp end together.
+func start_pickup_input_lock(duration_s: float = -1.0) -> void:
+	if duration_s < 0.0:
+		duration_s = facing_warp_duration_s
+	_pickup_input_lock_remaining_s = maxf(_pickup_input_lock_remaining_s,
+		duration_s)
 
 
 ## Read-only snapshot of the buffer state for BallController. Returns

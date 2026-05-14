@@ -811,6 +811,81 @@ func test_turn_glue_skipped_when_carry_direction_steady() -> void:
 		"Steady carry direction must not trigger a turn-glue teleport")
 
 
+func test_pickup_arms_input_lock_when_warp_fires() -> void:
+	# Pickup of an INCOMING ball (ball moving toward player) triggers
+	# both the visual warp AND the input lock. Same duration as the
+	# facing warp so the two end together.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	# Ball moving toward player from +Z side.
+	ball.global_position = Vector3(0.0, 0.11, 1.0)
+	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## heading toward player
+	bc._assign_carrier(p)
+	assert_gt(p._pickup_input_lock_remaining_s, 0.0,
+		"Pickup of an incoming ball must arm the input-lock window")
+	assert_almost_eq(p._pickup_input_lock_remaining_s,
+		p.facing_warp_duration_s, 0.001,
+		"Lock duration must match facing_warp_duration_s")
+
+
+func test_pickup_does_not_lock_when_ball_at_rest() -> void:
+	# Dead-ball pickup (ball not moving) → no facing warp, no input lock.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	ball.global_position = Vector3(0.5, 0.11, 0.0)
+	ball.linear_velocity = Vector3.ZERO
+	bc._assign_carrier(p)
+	assert_eq(p._pickup_input_lock_remaining_s, 0.0,
+		"Pickup of a still ball must NOT arm the input lock")
+
+
+# ---- Stop-glue (player intent ZERO → ball decel matches carrier) -------
+
+func test_stop_glue_locks_ball_to_foot_when_intent_zero() -> void:
+	# Player carrying ball, releases input → intent ZERO. Ball must
+	# snap to the foot AND velocity matches carrier so both decel
+	# together.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	# Drive ZERO input first to make intent EXPLICITLY zero.
+	p.apply_movement_step(Vector3.ZERO, false, 1.0 / 120.0)
+	# Then set carrier velocity (still slowing down from prior motion).
+	p.velocity = Vector3(p.max_walk_speed * 0.5, 0.0, 0.0)
+	bc._assign_carrier(p)
+	# Ball ahead of player but within turn_glue_radius.
+	ball.global_position = Vector3(0.0, 0.11, 0.6)
+	ball.linear_velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## faster
+	ball._pending_teleport = null
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_teleport,
+		"Stop-glue must teleport the ball to the foot")
+	assert_not_null(ball._pending_linear,
+		"Stop-glue must match carrier velocity")
+	var staged_v: Vector3 = ball._pending_linear as Vector3
+	assert_almost_eq(staged_v.x, p.velocity.x, 0.001,
+		"Ball planar velocity must equal carrier velocity X")
+	assert_almost_eq(staged_v.z, p.velocity.z, 0.001,
+		"Ball planar velocity must equal carrier velocity Z")
+
+
+func test_stop_glue_skipped_when_intent_non_zero() -> void:
+	# Carrier still pressing a direction → stop-glue must NOT fire.
+	# Normal physics + (eventual) kick takes over.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.apply_movement_step(Vector3(0.0, 0.0, -1.0), false, 1.0 / 120.0)
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -0.6)
+	ball.linear_velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	ball._pending_teleport = null
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
+	bc.step(1.0 / 60.0)
+	assert_eq(ball._pending_teleport, null,
+		"Active direction intent must skip stop-glue")
+
+
 func test_turn_glue_baseline_resets_when_carrier_stops() -> void:
 	# Carrier slow → turn-glue baseline must reset so the next
 	# movement starts fresh (no spurious "turn" from old baseline).
