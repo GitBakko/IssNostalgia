@@ -534,3 +534,111 @@ func test_pickup_resumes_after_lockout_expires() -> void:
 	bc.step(0.0)
 	assert_eq(bc.get_carrier(), players_a[0],
 		"After lockout drains, normal pickup resumes")
+
+
+# ---- Buffered turn → pivot kick (Bug 1, playtest 2026-05-14) -----------
+
+func test_buffered_turn_kick_uses_intent_and_snaps_velocity() -> void:
+	# Carrier physically moving +X (committed/buffered direction), but
+	# input intends +Z. Buffer is active. When the proximity kick fires,
+	# the ball must be launched along +Z (intent) AND the player.velocity
+	# must be redirected from +X to +Z, preserving planar speed.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	var speed: float = p.max_walk_speed
+	p.velocity = Vector3(speed, 0.0, 0.0)
+	# Simulate buffer state: committed=+X, intent=+Z, buffer active.
+	p._committed_input_dir = Vector3(1.0, 0.0, 0.0)
+	p._intended_input_dir = Vector3(0.0, 0.0, 1.0)
+	p._input_buffer_active = true
+	p._input_buffer_remaining_s = 0.5
+	p._ball_moving_with_me = true
+	p.has_ball = true
+	bc._carrier = p
+	bc._last_kick_direction = Vector3.ZERO  ## no dampen on first kick
+	ball._pending_linear = null
+	bc._apply_proximity_kick(p.velocity)
+	assert_not_null(ball._pending_linear, "Pivot kick must stage a launch state")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	assert_almost_eq(pending.x, 0.0, 0.05, "Pivot kick X component should be ~0 (intent is +Z)")
+	assert_gt(pending.z, 0.0, "Pivot kick Z must be positive (intent direction)")
+	# Player velocity must be snapped to +Z, preserving planar speed.
+	assert_almost_eq(p.velocity.x, 0.0, 0.05, "Player.velocity X must snap to ~0 after pivot")
+	assert_gt(p.velocity.z, 0.0, "Player.velocity Z must be positive after pivot")
+	assert_almost_eq(p.velocity.length(), speed, 0.05,
+		"Pivot must preserve planar speed (no decel)")
+
+
+func test_buffered_stop_traps_ball_at_foot() -> void:
+	# Carrier moving forward, releases input → intent = ZERO, buffer
+	# engages. When proximity kick fires, the ball must be TRAPPED:
+	# planar velocity zeroed, Y preserved.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	p._committed_input_dir = Vector3(0.0, 0.0, -1.0)
+	p._intended_input_dir = Vector3.ZERO  ## release
+	p._input_buffer_active = true
+	p._input_buffer_remaining_s = 0.5
+	p._ball_moving_with_me = true
+	p.has_ball = true
+	bc._carrier = p
+	ball.linear_velocity = Vector3(0.5, 1.2, -3.0)  ## mid-bounce, rolling
+	ball._pending_linear = null
+	bc._apply_proximity_kick(p.velocity)
+	assert_not_null(ball._pending_linear, "Trap must stage a launch state")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	assert_almost_eq(pending.x, 0.0, 0.001, "Trap zeroes planar X")
+	assert_almost_eq(pending.z, 0.0, 0.001, "Trap zeroes planar Z")
+	assert_almost_eq(pending.y, 1.2, 0.001, "Trap preserves Y (bounce continues)")
+
+
+# ---- Passive brake when carrier stops (Bug 2) --------------------------
+
+func test_passive_brake_decays_ball_when_carrier_almost_still() -> void:
+	# Carrier almost stopped, ball within brake_radius_m, ball still
+	# rolling → passive brake decays the planar velocity each tick.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -bc.kick_min_carrier_speed_m_s * 0.5)
+	bc._assign_carrier(p)
+	# Ball within brake_radius_m, still rolling fast.
+	ball.global_position = Vector3(0.0, 0.11, -0.6)  ## 0.6 m, inside brake_radius (1.2)
+	ball.linear_velocity = Vector3(0.0, 0.0, -4.0)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_linear, "Passive brake must stage a decayed velocity")
+	var pending: Vector3 = ball._pending_linear as Vector3
+	assert_lt(absf(pending.z), 4.0, "Brake must reduce planar speed")
+	assert_gt(absf(pending.z), 0.0, "Decay should still leave some planar motion above snap threshold")
+
+
+func test_passive_brake_snaps_to_stop_below_threshold() -> void:
+	# Below brake_snap_threshold_m_s the brake snaps planar to zero.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3.ZERO  ## fully still
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -0.5)
+	ball.linear_velocity = Vector3(0.0, 0.0, -bc.brake_snap_threshold_m_s * 0.5)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_not_null(ball._pending_linear)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	assert_almost_eq(pending.x, 0.0, 0.001, "Snap zeroes X")
+	assert_almost_eq(pending.z, 0.0, 0.001, "Snap zeroes Z")
+
+
+func test_passive_brake_skipped_when_ball_far() -> void:
+	# Beyond brake_radius_m the brake doesn't fire (ball is "loose",
+	# not "at the foot"). Loss threshold handles drift past 3 m.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3.ZERO
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -2.0)  ## > brake_radius (1.2)
+	ball.linear_velocity = Vector3(0.0, 0.0, -2.0)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	assert_eq(ball._pending_linear, null,
+		"Carrier still + ball far → no brake (loss threshold takes over)")

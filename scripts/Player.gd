@@ -247,6 +247,32 @@ func on_possession_lost() -> void:
 	_ball_moving_with_me = false
 
 
+## Read-only snapshot of the buffer state for BallController. Returns
+## { active: bool, intent: Vector3 } — `intent` is the planar
+## _intended_input_dir (NOT normalized; ZERO = stop intent). Used by
+## the proximity kick to decide PIVOT (turn) vs TRAP (stop) on touch.
+func get_buffer_state() -> Dictionary:
+	return {
+		"active": _input_buffer_active,
+		"intent": Vector3(_intended_input_dir.x, 0.0, _intended_input_dir.z),
+	}
+
+
+## Force-redirect velocity to a new planar direction, preserving the
+## current planar speed and Y component. Called by BallController on a
+## buffered-turn touch so the body pivots in lockstep with the ball
+## kick — without this, the player keeps drifting in the OLD direction
+## (committed) while the ball flies in the NEW direction (intended) and
+## possession is lost on every sharp turn.
+func snap_velocity_direction(planar_dir: Vector3) -> void:
+	var d: Vector3 = Vector3(planar_dir.x, 0.0, planar_dir.z)
+	if d.length_squared() < INPUT_DEAD_ZONE_SQ:
+		return
+	d = d.normalized()
+	var planar_speed: float = sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+	velocity = Vector3(d.x * planar_speed, velocity.y, d.z * planar_speed)
+
+
 ## Frame-rate-independent rotation of the visual basis toward `_facing_target`.
 ## Called from `_physics_process` and exposed for tests / Sprint 7 facing snap.
 ## When `_facing_warp_remaining_s > 0`, the boosted `rotation_speed_warp`

@@ -84,6 +84,20 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## Brief pickup lockout when possession is lost.
 @export var touch_loss_lockout_s: float = 0.1
 
+@export_group("Stop trap & passive brake (anti-runaway-ball)")
+## Radius around the carrier within which a passive brake is applied
+## to the ball when the carrier is at/near rest. Prevents the
+## "player stops, ball rolls away forever" frustration. 1.2 m covers
+## the natural kick flight distance at walk speed.
+@export var brake_radius_m: float = 1.2
+## Per-second decay rate applied to the ball's planar velocity while
+## the carrier is below `kick_min_carrier_speed_m_s` and ball is
+## within `brake_radius_m`. 6.0 → 95 % planar speed gone in ~0.5 s.
+@export var brake_decay_per_sec: float = 6.0
+## Below this planar speed the passive brake snaps the ball to a
+## complete planar stop (avoids endless tiny crawls).
+@export var brake_snap_threshold_m_s: float = 0.4
+
 # ---- Exports -------------------------------------------------------------
 @export var ball: BallPhysics
 ## All TeamControllers participating in this match. The order is
@@ -229,7 +243,10 @@ func _tick_dribble_impulses(delta: float) -> void:
 	var carrier_v: Vector3 = _carrier.velocity
 	var carrier_speed: float = carrier_v.length()
 	if carrier_speed < kick_min_carrier_speed_m_s:
-		return  ## carrier still — no kick, ball settles via friction
+		# Carrier essentially stopped: passive-brake the ball if it's
+		# still rolling within trap range so it doesn't drift away.
+		_apply_passive_brake(delta)
+		return
 	# Geometric trigger: carrier body reached the ball position.
 	var dx: float = ball.global_position.x - _carrier.global_position.x
 	var dz: float = ball.global_position.z - _carrier.global_position.z
@@ -242,6 +259,28 @@ func _tick_dribble_impulses(delta: float) -> void:
 	_kick_lockout_remaining_s = kick_lockout_s
 
 
+## Passive brake — when carrier intent is "stop" (low velocity) and the
+## ball is within trap range, decay the ball's planar speed each tick.
+## Y is preserved so a mid-bounce ball still falls naturally.
+func _apply_passive_brake(delta: float) -> void:
+	if _carrier == null or ball == null:
+		return
+	var dx: float = ball.global_position.x - _carrier.global_position.x
+	var dz: float = ball.global_position.z - _carrier.global_position.z
+	if dx * dx + dz * dz > brake_radius_m * brake_radius_m:
+		return
+	var v: Vector3 = ball.linear_velocity
+	var planar_sq: float = v.x * v.x + v.z * v.z
+	if planar_sq < 0.0001:
+		return
+	var planar_speed: float = sqrt(planar_sq)
+	if planar_speed <= brake_snap_threshold_m_s:
+		ball.apply_launch_state(Vector3(0.0, v.y, 0.0))
+		return
+	var factor: float = clampf(1.0 - brake_decay_per_sec * delta, 0.0, 1.0)
+	ball.apply_launch_state(Vector3(v.x * factor, v.y, v.z * factor))
+
+
 func _apply_proximity_kick(carrier_v: Vector3) -> void:
 	var planar: Vector3 = Vector3(carrier_v.x, 0.0, carrier_v.z)
 	var carrier_speed: float = planar.length()
@@ -249,17 +288,50 @@ func _apply_proximity_kick(carrier_v: Vector3) -> void:
 		return
 	var v_dir: Vector3 = planar / carrier_speed
 
-	# Fix #2 — kick direction is a blend of visual_forward (responsive,
-	# rotates immediately on input via R09-F04 warp) and velocity
-	# direction (physically grounded). Pure-velocity kicks lag visibly
-	# on hard turns; pure-visual kicks risk launching the ball before
-	# the body has actually pivoted.
-	var fwd_dir: Vector3 = _carrier.get_visual_forward()
-	var blend_w: float = clampf(kick_direction_blend_visual, 0.0, 1.0)
-	var kick_dir_raw: Vector3 = v_dir * (1.0 - blend_w) + fwd_dir * blend_w
-	var kick_dir: Vector3 = v_dir
-	if kick_dir_raw.length_squared() > 0.001:
-		kick_dir = kick_dir_raw.normalized()
+	# Buffer-aware: a touch fired while the carrier had a buffered
+	# direction change is the moment the dribble snaps to the new
+	# heading. Two cases:
+	#   - buffered STOP (intent ~ ZERO) → TRAP: zero out planar ball
+	#     velocity so the ball comes to rest at the foot;
+	#   - buffered TURN (intent != ZERO) → PIVOT: kick along the new
+	#     intent AND snap player.velocity to it (preserves planar
+	#     speed). Without the velocity snap the body keeps drifting
+	#     in the OLD committed direction while the ball flies in the
+	#     NEW intended direction → instant possession loss on every
+	#     hard turn (Bug 1, playtest 2026-05-14).
+	var buf_active: bool = false
+	var buf_intent: Vector3 = Vector3.ZERO
+	if _carrier.has_method("get_buffer_state"):
+		var bs: Dictionary = _carrier.get_buffer_state()
+		buf_active = bool(bs.get("active", false))
+		buf_intent = bs.get("intent", Vector3.ZERO)
+	var buf_intent_zero: bool = buf_intent.length_squared() < 1.0e-4
+
+	if buf_active and buf_intent_zero:
+		# TRAP — buffered stop. Settle the ball planar-still at foot.
+		var bv: Vector3 = ball.linear_velocity
+		ball.apply_launch_state(Vector3(0.0, bv.y, 0.0))
+		_last_kick_direction = Vector3.ZERO
+		if _carrier.has_method("on_dribble_touch"):
+			_carrier.on_dribble_touch()
+		touch_fired.emit(_carrier)
+		return
+
+	# Choose kick direction.
+	var kick_dir: Vector3
+	if buf_active and not buf_intent_zero:
+		# PIVOT — kick along the new intent; pivot the body too.
+		kick_dir = buf_intent.normalized()
+		if _carrier.has_method("snap_velocity_direction"):
+			_carrier.snap_velocity_direction(kick_dir)
+	else:
+		# Default — visual-led blend (Fix #2 R09-F04 + R02-F03).
+		var fwd_dir: Vector3 = _carrier.get_visual_forward()
+		var blend_w: float = clampf(kick_direction_blend_visual, 0.0, 1.0)
+		var kick_dir_raw: Vector3 = v_dir * (1.0 - blend_w) + fwd_dir * blend_w
+		kick_dir = v_dir
+		if kick_dir_raw.length_squared() > 0.001:
+			kick_dir = kick_dir_raw.normalized()
 
 	# Walk vs sprint factor (user tune 2026-05-14).
 	var factor: float = kick_factor_walk
@@ -279,7 +351,7 @@ func _apply_proximity_kick(carrier_v: Vector3) -> void:
 	_last_kick_direction = kick_dir
 
 	# Notify carrier — flushes its direction-input buffer (Q1-Q8).
-	if _carrier != null and _carrier.has_method("on_dribble_touch"):
+	if _carrier.has_method("on_dribble_touch"):
 		_carrier.on_dribble_touch()
 	touch_fired.emit(_carrier)
 
