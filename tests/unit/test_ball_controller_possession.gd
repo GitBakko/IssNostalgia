@@ -148,26 +148,66 @@ func test_human_team_wins_simultaneous_pickup() -> void:
 
 # ---- S08-T02 geometric proximity-kick dribble (R02-F05 Arch B feel) ----
 
-func test_kick_fires_on_proximity_meet() -> void:
-	# Carrier moving + ball within kick_proximity_m → kick fires
-	# immediately (no timer). The fired velocity = carrier velocity ×
-	# kick_velocity_factor in carrier direction.
+func test_kick_fires_on_proximity_meet_walk() -> void:
+	# Walking carrier meets ball → kick at carrier_speed * kick_factor_walk.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
-	# Ball at carrier position (well within proximity).
+	# Visual forward aligned with velocity (no facing/velocity mismatch
+	# so the blend is unambiguous).
+	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
 	ball.global_position = Vector3(0.0, 0.11, -0.1)
 	ball.linear_velocity = Vector3.ZERO
 	bc._assign_carrier(p)
-	# Reset pending so we detect the new kick stage.
 	ball._pending_linear = null
 	bc.step(1.0 / 60.0)
 	assert_not_null(ball._pending_linear,
 		"Carrier-meets-ball proximity must fire a kick immediately")
 	var pending: Vector3 = ball._pending_linear as Vector3
-	var expected_speed: float = p.velocity.length() * bc.kick_velocity_factor
+	var expected_speed: float = p.velocity.length() * bc.kick_factor_walk
 	assert_almost_eq(Vector2(pending.x, pending.z).length(), expected_speed, 1.0e-2,
-		"Kick speed = carrier_speed * kick_velocity_factor")
+		"Walk-speed kick uses kick_factor_walk")
+
+
+func test_kick_fires_on_proximity_meet_sprint() -> void:
+	# Sprint regime → kick uses kick_factor_sprint instead.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_sprint_speed)
+	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
+	ball.linear_velocity = Vector3.ZERO
+	bc._assign_carrier(p)
+	ball._pending_linear = null
+	bc.step(1.0 / 60.0)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	var expected_speed: float = p.velocity.length() * bc.kick_factor_sprint
+	assert_almost_eq(Vector2(pending.x, pending.z).length(), expected_speed, 1.0e-2,
+		"Sprint-speed kick uses kick_factor_sprint")
+
+
+func test_kick_dampened_on_sharp_turn() -> void:
+	# After a kick fires, a second kick fired in a sharply different
+	# direction must use the dampened factor (kick_factor * dampen).
+	# Drives _apply_proximity_kick directly to bypass the lockout
+	# state machine and isolate the dampen path.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	p.get_node(^"VisualRoot").transform.basis = Basis.IDENTITY
+	bc._assign_carrier(p)
+	# First kick — establishes _last_kick_direction (-Z).
+	bc._apply_proximity_kick(p.velocity)
+	# Pivot 90°: carrier now moving +X, visual_root facing +X.
+	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)
+	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(1, 0, 0), Vector3.UP)
+	ball._pending_linear = null
+	# Second kick — direction angle vs first ≈ 90°, beyond threshold.
+	bc._apply_proximity_kick(p.velocity)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	var expected_dampened: float = p.velocity.length() * bc.kick_factor_walk * bc.kick_turn_dampen_factor
+	assert_almost_eq(Vector2(pending.x, pending.z).length(), expected_dampened, 1.0e-2,
+		"Sharp-turn kick must use dampened factor")
 
 
 func test_no_kick_when_carrier_far_from_ball() -> void:
@@ -220,10 +260,13 @@ func test_kick_lockout_prevents_double_fire() -> void:
 func test_kick_uses_carrier_direction_after_turn() -> void:
 	# Carrier turns, ball still rolling old direction. When carrier
 	# meets the ball, the kick fires in the NEW carrier direction —
-	# letting the dribble change heading instantly.
+	# letting the dribble change heading instantly. The blend uses
+	# visual_forward too (fix #2), so the test rotates VisualRoot to
+	# match the new heading just like the warp does in-game.
 	var p: Player = players_a[0]
 	p.global_position = Vector3.ZERO
 	p.velocity = Vector3(p.max_walk_speed, 0.0, 0.0)  ## now going +X
+	p.get_node(^"VisualRoot").transform.basis = Basis.looking_at(Vector3(1, 0, 0), Vector3.UP)
 	ball.global_position = Vector3(0.1, 0.11, 0.0)  ## within proximity
 	ball.linear_velocity = Vector3(0.0, 0.0, -3.0)  ## was going -Z
 	bc._assign_carrier(p)
@@ -231,11 +274,11 @@ func test_kick_uses_carrier_direction_after_turn() -> void:
 	bc.step(1.0 / 60.0)
 	assert_not_null(ball._pending_linear)
 	var pending: Vector3 = ball._pending_linear as Vector3
-	# Kick must be primarily +X (new direction), not -Z (old ball v).
+	# Kick is primarily +X (new direction).
 	assert_gt(pending.x, 0.0,
 		"Post-turn kick must use carrier's NEW direction (+X)")
 	assert_almost_eq(pending.z, 0.0, 0.01,
-		"Post-turn kick has no Z component (carrier is going pure +X)")
+		"With visual_forward also aligned to +X, no Z component remains")
 
 
 # ---- release proxy ------------------------------------------------------

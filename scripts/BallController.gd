@@ -46,11 +46,27 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## reaches ball" — no periodic timer, the cycle length emerges from
 ## drag + carrier speed (real football: kick → coast → catch up → kick).
 @export var kick_proximity_m: float = 0.35
-## Boost factor on the carrier velocity. > 1 = ball outruns carrier
-## briefly between kicks. 1.10 = 10 % boost, ball flies ~1-2 m
-## before drag brings it back below carrier speed. Lower = tighter
-## control, higher = looser dribble.
-@export var kick_velocity_factor: float = 1.10
+## Boost factor on the carrier velocity at WALK speed. 1.20 = ball
+## leaves 20 % faster than carrier → ~1.6 m flight before drag brings
+## it back below carrier speed. Tuned 2026-05-14 per user playtest.
+@export var kick_factor_walk: float = 1.20
+## Boost factor at SPRINT speed (carrier_speed > max_walk_speed).
+## 1.35 → ~4.5 m flight, "tocco lungo" feel of attackers in space.
+@export var kick_factor_sprint: float = 1.35
+## Fix #2 (R09-F04 anim warp + R02-F03 blend): kick direction = blend
+## of carrier visual_forward (rotates immediately on input) and
+## carrier.velocity (physical, lags on hard turn). 0.0 = pure
+## velocity (ball lags on turn), 1.0 = pure visual (responsive to
+## facing). 0.7 = strongly visual-led with physics safety net.
+@export_range(0.0, 1.0, 0.05) var kick_direction_blend_visual: float = 0.7
+## Fix #4 (R02-F04 attribute-driven control): when the new kick
+## direction differs from the previous kick direction by more than
+## this many degrees, scale down the kick factor — keeps the ball
+## closer through hard turns instead of launching it across the pitch.
+@export var kick_turn_dampen_threshold_deg: float = 30.0
+## Multiplier applied to the chosen walk/sprint factor when the turn
+## threshold trips. 0.65 → 35 % weaker kick on a sharp redirect.
+@export_range(0.0, 1.0, 0.05) var kick_turn_dampen_factor: float = 0.65
 ## Brief lockout after each kick — prevents the same physics tick
 ## from firing the kick twice in a row (kick → ball still inside
 ## proximity for a frame → would re-fire). 0.05 s = 6 ticks @ 120 Hz,
@@ -96,6 +112,12 @@ var _ordered_teams: Array[TeamController] = []
 var _last_log_pickup_dist_sq: float = INF
 var _pickup_lockout_remaining_s: float = 0.0
 var _kick_lockout_remaining_s: float = 0.0
+## Direction of the previous kick — used to detect turn for #4 dampen.
+var _last_kick_direction: Vector3 = Vector3.ZERO
+
+## Emitted whenever a touch (proximity kick) fires. Carrier listens to
+## flush its direction-input buffer (S08 dribble-buffer system).
+signal touch_fired(carrier: Player)
 ## Player currently in the ball's collision-exception list (the only
 ## one that can "walk through" the ball). Tracked here so we can
 ## remove the exception cleanly on release / loss.
@@ -222,11 +244,44 @@ func _tick_dribble_impulses(delta: float) -> void:
 
 func _apply_proximity_kick(carrier_v: Vector3) -> void:
 	var planar: Vector3 = Vector3(carrier_v.x, 0.0, carrier_v.z)
-	if planar.length_squared() < 0.01:
+	var carrier_speed: float = planar.length()
+	if carrier_speed < 0.01:
 		return
-	var target: Vector3 = planar * kick_velocity_factor
+	var v_dir: Vector3 = planar / carrier_speed
+
+	# Fix #2 — kick direction is a blend of visual_forward (responsive,
+	# rotates immediately on input via R09-F04 warp) and velocity
+	# direction (physically grounded). Pure-velocity kicks lag visibly
+	# on hard turns; pure-visual kicks risk launching the ball before
+	# the body has actually pivoted.
+	var fwd_dir: Vector3 = _carrier.get_visual_forward()
+	var blend_w: float = clampf(kick_direction_blend_visual, 0.0, 1.0)
+	var kick_dir_raw: Vector3 = v_dir * (1.0 - blend_w) + fwd_dir * blend_w
+	var kick_dir: Vector3 = v_dir
+	if kick_dir_raw.length_squared() > 0.001:
+		kick_dir = kick_dir_raw.normalized()
+
+	# Walk vs sprint factor (user tune 2026-05-14).
+	var factor: float = kick_factor_walk
+	if carrier_speed > _carrier.max_walk_speed:
+		factor = kick_factor_sprint
+
+	# Fix #4 — dampen the factor on detected turn so the ball doesn't
+	# escape control during direction changes.
+	if _last_kick_direction.length_squared() > 0.001:
+		var cos_thresh: float = cos(deg_to_rad(kick_turn_dampen_threshold_deg))
+		if _last_kick_direction.dot(kick_dir) < cos_thresh:
+			factor *= kick_turn_dampen_factor
+
+	var target: Vector3 = kick_dir * (carrier_speed * factor)
 	target.y = ball.linear_velocity.y  ## preserve Y (mid-bounce)
 	ball.apply_launch_state(target)
+	_last_kick_direction = kick_dir
+
+	# Notify carrier — flushes its direction-input buffer (Q1-Q8).
+	if _carrier != null and _carrier.has_method("on_dribble_touch"):
+		_carrier.on_dribble_touch()
+	touch_fired.emit(_carrier)
 
 
 # ---- Lifecycle -----------------------------------------------------------
@@ -344,4 +399,7 @@ func _clear_collision_exception() -> void:
 
 func _clear_carrier_flag() -> void:
 	if _carrier != null:
+		if _carrier.has_method("on_possession_lost"):
+			_carrier.on_possession_lost()
 		_carrier.has_ball = false
+	_last_kick_direction = Vector3.ZERO

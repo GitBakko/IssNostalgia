@@ -34,6 +34,18 @@ const STAMINA_RECOVERY_PER_SEC: float = 1.0 / 5.0
 ## Smallest squared input magnitude treated as "movement intent".
 const INPUT_DEAD_ZONE_SQ: float = 1.0e-4
 
+## Direction-input buffer (S08 anti-frustration system). When the
+## carrier is in possession AND the ball is moving with them, a
+## direction change > DIRECTION_BUFFER_DEAD_ZONE_DEG is BUFFERED:
+## the player's mesh rotates immediately (visual feedback), but the
+## physical velocity stays in the OLD direction until the next
+## BallController touch fires (or the buffer cap times out). Eliminates
+## the "ball lost on every turn" frustration. R01-F05 backing
+## (eFootball v2.00 patch — small direction changes don't break the
+## sprint dribble).
+const DIRECTION_BUFFER_DEAD_ZONE_DEG: float = 15.0
+const DIRECTION_BUFFER_MAX_S: float = 0.8
+
 # ---- Exports -------------------------------------------------------------
 @export var team_config: TeamConfig
 @export var role_index: int = 0
@@ -95,6 +107,15 @@ var has_ball: bool = false
 ## `rotation_speed` (R09-F04 facing warp window — used by BallController
 ## on pickup). Drained by `update_facing(delta)`.
 var _facing_warp_remaining_s: float = 0.0
+## Direction buffer state — see DIRECTION_BUFFER_* constants.
+var _committed_input_dir: Vector3 = Vector3.ZERO  ## drives velocity
+var _intended_input_dir: Vector3 = Vector3.ZERO   ## latest from input (drives facing + buffer snapshot)
+var _input_buffer_active: bool = false
+var _input_buffer_remaining_s: float = 0.0
+## True after the FIRST BallController touch fires while we hold the
+## ball — buffer engages only from this point on, so the initial
+## "starting from rest" input applies immediately (Q4).
+var _ball_moving_with_me: bool = false
 
 
 func _ready() -> void:
@@ -115,6 +136,13 @@ func _ready() -> void:
 ## tick coupling.
 func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> void:
 	_driven_this_tick = true
+	# Capture INTENDED input (planar) — drives facing immediately and
+	# is the snapshot read by the buffer on the next touch.
+	_intended_input_dir = Vector3(input_dir.x, 0.0, input_dir.z)
+	# Resolve the COMMITTED direction the velocity should follow this
+	# tick (may equal intended, or may be the buffered "old" direction).
+	var commit_dir: Vector3 = _resolve_committed_input(_intended_input_dir, dt)
+
 	# 1) stamina (S06-D04 gate: recovery happens ONLY when sprint released)
 	if sprint_held and stamina > STAMINA_EMPTY:
 		stamina = maxf(STAMINA_EMPTY, stamina - STAMINA_DRAIN_PER_SEC * dt)
@@ -122,12 +150,12 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 		stamina = minf(STAMINA_FULL, stamina + STAMINA_RECOVERY_PER_SEC * dt)
 	# else: sprint held but stamina exhausted → frozen at 0 (no recovery)
 
-	# 2) effective max speed
+	# 2) effective max speed (sprint Q6: immediate, never buffered)
 	var sprint_active: bool = sprint_held and stamina > STAMINA_EMPTY
 	var max_speed: float = max_sprint_speed if sprint_active else max_walk_speed
 
-	# 3) target velocity from input, cap accel per tick
-	var planar_input: Vector3 = Vector3(input_dir.x, 0.0, input_dir.z)
+	# 3) target velocity from COMMITTED direction
+	var planar_input: Vector3 = commit_dir
 	if planar_input.length_squared() > 1.0:
 		planar_input = planar_input.normalized()
 	var target_velocity: Vector3 = planar_input * max_speed
@@ -137,9 +165,10 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 		dv = dv.normalized() * max_dv
 	velocity += dv
 
-	# 4) facing target from movement input (rotates only when there's intent)
-	if planar_input.length_squared() > INPUT_DEAD_ZONE_SQ:
-		_facing_target = planar_input
+	# 4) facing target from INTENDED input (Q1: immediate visual feedback
+	# even while velocity is buffered).
+	if _intended_input_dir.length_squared() > INPUT_DEAD_ZONE_SQ:
+		_facing_target = _intended_input_dir
 
 	# 5) state — purely informational for now (HUD / TeamController)
 	if velocity.length_squared() < 0.01:
@@ -148,6 +177,74 @@ func apply_movement_step(input_dir: Vector3, sprint_held: bool, dt: float) -> vo
 		state = State.RUNNING
 	else:
 		state = State.RUNNING
+
+
+## Direction-input buffer (S08 / R01-F05). Returns the direction the
+## velocity should track this tick. Bypasses the buffer when the
+## carrier doesn't have the ball OR the ball hasn't been touched yet
+## (Q4: from-rest start is immediate) OR the carrier is in a
+## SHOOTING/PASSING anim (Q8: input ignored — keeps current direction).
+func _resolve_committed_input(intended: Vector3, dt: float) -> Vector3:
+	# Q8: during shoot/pass anim, input is frozen at its prior commit.
+	if is_busy_with_ball_action():
+		return _committed_input_dir
+	# No buffer when not carrying or before first dribble touch.
+	if not (has_ball and _ball_moving_with_me):
+		_committed_input_dir = intended
+		_input_buffer_active = false
+		_input_buffer_remaining_s = 0.0
+		return intended
+	# Buffer NOT active — check if the new input crosses the dead zone.
+	if not _input_buffer_active:
+		if _within_buffer_dead_zone(_committed_input_dir, intended):
+			# Within < 15° — pass through (Q2 dead zone).
+			_committed_input_dir = intended
+			return intended
+		# Engage the buffer — keep old direction, snapshot intended.
+		_input_buffer_active = true
+		_input_buffer_remaining_s = DIRECTION_BUFFER_MAX_S
+		return _committed_input_dir
+	# Buffer active — drain timer.
+	_input_buffer_remaining_s -= dt
+	if _input_buffer_remaining_s <= 0.0:
+		# Q7 cap timeout — flush.
+		_committed_input_dir = intended
+		_input_buffer_active = false
+		_input_buffer_remaining_s = 0.0
+		return intended
+	# Buffered — keep old direction in motion, intended waits for touch.
+	return _committed_input_dir
+
+
+static func _within_buffer_dead_zone(a: Vector3, b: Vector3) -> bool:
+	var a_zero: bool = a.length_squared() < 1.0e-4
+	var b_zero: bool = b.length_squared() < 1.0e-4
+	if a_zero and b_zero:
+		return true
+	if a_zero != b_zero:
+		return false  ## ZERO ↔ non-ZERO = significant change (Q5: stop is buffered)
+	var dot: float = a.normalized().dot(b.normalized())
+	var cos_threshold: float = cos(deg_to_rad(DIRECTION_BUFFER_DEAD_ZONE_DEG))
+	return dot >= cos_threshold
+
+
+## Called by BallController each time a proximity-kick fires while
+## this player is the carrier. Q3: snapshot intended at touch instant
+## → committed; clears buffer; marks ball-moving-with-me.
+func on_dribble_touch() -> void:
+	_committed_input_dir = _intended_input_dir
+	_input_buffer_active = false
+	_input_buffer_remaining_s = 0.0
+	_ball_moving_with_me = true
+
+
+## Called by BallController on possession loss. Q7: flush buffer
+## immediately — full input control restored.
+func on_possession_lost() -> void:
+	_committed_input_dir = _intended_input_dir
+	_input_buffer_active = false
+	_input_buffer_remaining_s = 0.0
+	_ball_moving_with_me = false
 
 
 ## Frame-rate-independent rotation of the visual basis toward `_facing_target`.
