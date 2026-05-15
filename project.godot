@@ -13,7 +13,7 @@ config_version=5
 config/name="IssNostalgia"
 config/description="Mobile football game inspired by ISS Pro Evolution 2."
 config/version="0.1.0"
-run/main_scene="res://scenes/PhysicsSandbox.tscn"
+run/main_scene="res://scenes/GameMatch.tscn"
 config/features=PackedStringArray("4.6", "Mobile")
 config/icon="res://icon.svg"
 
