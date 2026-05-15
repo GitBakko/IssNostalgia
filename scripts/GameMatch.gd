@@ -147,7 +147,8 @@ func _spawn_team_a() -> void:
 	team_a_ctrl.ball_ref = ball
 	team_a_ctrl.is_human = true
 	team_a_root.add_child(team_a_ctrl)
-	team_a_goalkeeper = _spawn_goalkeeper(players_a, team_a_root, -52.5, "A")
+	team_a_goalkeeper = _spawn_goalkeeper(players_a, team_a_root, -52.5, "A",
+		Scoreboard.TEAM_A)
 
 
 func _spawn_team_b() -> void:
@@ -179,11 +180,13 @@ func _spawn_team_b() -> void:
 		team_b_static_ai.formation = formation
 		team_b_static_ai.mirror_anchors = true
 		team_b_root.add_child(team_b_static_ai)
-	team_b_goalkeeper = _spawn_goalkeeper(players_b, team_b_root, 52.5, "B")
+	team_b_goalkeeper = _spawn_goalkeeper(players_b, team_b_root, 52.5, "B",
+		Scoreboard.TEAM_B)
 
 
 func _spawn_goalkeeper(team_players: Array[Player], root: Node3D,
-		own_goal_z: float, label: String) -> Goalkeeper:
+		own_goal_z: float, label: String,
+		team_id: int = Scoreboard.TEAM_A) -> Goalkeeper:
 	# Find the GK (formation marks the role; conventionally last entry).
 	var gk_player: Player = null
 	for p in team_players:
@@ -197,6 +200,7 @@ func _spawn_goalkeeper(team_players: Array[Player], root: Node3D,
 	gk.goalkeeper = gk_player
 	gk.ball = ball
 	gk.goal_z = own_goal_z
+	gk.my_team_id = team_id
 	root.add_child(gk)
 	return gk
 
@@ -297,6 +301,14 @@ func _spawn_match_state() -> void:
 	# Wire HUD-side responses (HUD label updates done in _update_hud).
 	scoreboard.score_changed.connect(_on_score_changed)
 	match_clock.match_ended.connect(_on_match_ended)
+	# T04 — inject scoreboard + clock into goalkeepers so the
+	# catch-up boost can read live state.
+	if team_a_goalkeeper != null:
+		team_a_goalkeeper.scoreboard = scoreboard
+		team_a_goalkeeper.match_clock = match_clock
+	if team_b_goalkeeper != null:
+		team_b_goalkeeper.scoreboard = scoreboard
+		team_b_goalkeeper.match_clock = match_clock
 	if ball != null:
 		_last_goal_test_z = ball.global_position.z
 

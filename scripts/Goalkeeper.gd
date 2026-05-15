@@ -115,12 +115,19 @@ extends Node
 ## controller is instantiated.
 @export var ball_controller: BallController
 
-@export_group("NBA Jam catch-up boost (R09-F02 — schema only)")
-## T06 schema only — eligibility wiring requires the scoreboard
-## (Sprint 9). When `false` (default) all catch-up modifiers are
-## inert; `get_effective_reaction_buffer_s()` returns the raw
-## `reaction_buffer_s` regardless of score state.
-@export var catchup_boost_enabled: bool = false
+@export_group("NBA Jam catch-up boost (R09-F02)")
+## Sprint 9 T04 — runtime wired. When enabled AND the GK's team
+## is trailing by `trailing_goal_threshold` AND the match clock is
+## inside `time_remaining_threshold_s`, `get_effective_reaction
+## _buffer_s()` returns the scaled buffer for tighter saves.
+@export var catchup_boost_enabled: bool = true
+## Sprint 9 T04 — references injected by GameMatch. NULL-safe:
+## eligibility returns false when either is missing.
+@export var scoreboard: Scoreboard
+@export var match_clock: MatchClock
+## Team id for scoreboard lookups (Scoreboard.TEAM_A = 0, TEAM_B = 1).
+## `defending_side = -1` → TEAM_A, `+1` → TEAM_B.
+@export_enum("Team A:0", "Team B:1") var my_team_id: int = 0
 ## Trailing goal margin that arms the boost (R09-F02).
 @export var trailing_goal_threshold: int = 2
 ## Match time-remaining window (s) the boost is active in (R09-F02).
@@ -454,12 +461,19 @@ func get_effective_reaction_buffer_s() -> float:
 	return reaction_buffer_s * catchup_gk_reaction_factor
 
 
-## R09-F02 schema hook — eligibility predicate. Sprint 8 stub:
-## ALWAYS returns false (the scoreboard / match clock that would
-## populate a real check don't exist yet). Sprint 9 will inject a
-## scoreboard reference and replace the body.
+## R09-F02 — eligibility predicate. Sprint 9 T04 runtime: trailing
+## by ≥ `trailing_goal_threshold` goals AND clock inside the final
+## `time_remaining_threshold_s` window. NULL-safe — missing
+## scoreboard or clock returns false (eligibility off).
 func is_catchup_eligible() -> bool:
-	return false
+	if not catchup_boost_enabled:
+		return false
+	if scoreboard == null or match_clock == null:
+		return false
+	if scoreboard.goal_gap_from(my_team_id) < trailing_goal_threshold:
+		return false
+	return match_clock.current_time_remaining_s \
+		<= time_remaining_threshold_s
 
 
 ## Explicit catch resolution — needed because BallPhysics runs with
