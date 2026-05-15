@@ -191,3 +191,16 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 
 | Date       | Task   | Notes |
 |------------|--------|-------|
+| 2026-05-14 | T02-fix1..fix5 | Touch-cycle dribble iteration: rejected continuous tracking ("palla incollata = gioco di merda"), rejected fixed-factor periodic kicks ("rope tether"), rejected drag-compensated formula ("ball drift"). Settled on Architecture B / R02-F05 (geometric proximity kick). |
+| 2026-05-14 | T02-fix6 | Direction-input buffer added (Q1-Q8 spec). Mesh facing immediate, velocity buffered until next touch. Eliminated ball-loss-on-turn frustration. |
+| 2026-05-14 | T02-fix7 | Magnetic centering between kicks added to fix circular-sweep ball loss (incremental sub-dead-zone turns accumulated drift > loss threshold). |
+| 2026-05-14 | T02-fix8 | Walk/sprint kick factors shortened to 1.08 / 1.18 per playtest "lanci troppo lunghi". Per-player attribute override deferred Sprint 9 (R02-F07). |
+| 2026-05-14 | T02-fix9..fix10 | Turn-glue: ball position+velocity rotates with carrier visual_forward. Hard snap (no per-tick cap, no smoothing). Centering disabled by default. Eliminates "trail / snap-back" on turns. |
+| 2026-05-14 | T02-fix11 | Symmetric collision exception (player AND ball). Bumped turn_glue_offset_m 0.40→0.55 to clear capsule. Godot 4 invariant: CharacterBody3D move_and_slide reads its OWN exception list. |
+| 2026-05-14 | T02-fix12 | Direction-input buffer made INERT — turn-glue obsoleted it. Composed mitigations (buffer + glue) caused "drift" feel where mesh new dir + body old dir. Lesson: remove workarounds when root fix lands. |
+| 2026-05-14 | T02-fix13 | Pickup input lock re-introduced (mirrors facing warp). Stop-glue: when carrier intent=ZERO, ball velocity=carrier velocity → both decel together via Player.accel + passive brake. |
+| 2026-05-14 | T04 | StaticAI 2 Hz tactical + Player.set_static_target(pos, max_speed) autopilot. R05-F01..F06 applied; F07 deferred Phase 3; F03 half-change event hybrid deferred Sprint 9. |
+| 2026-05-15 | T05 | Goalkeeper controller (separate from Player). 3-branch decision (idle / save / snap). R04-F01..F02/F04..F06 applied; F03 deferred Phase 3. |
+| 2026-05-15 | T05-fix1 | GK catch resolution — ball was phasing through GK because BallPhysics custom_integrator skips dynamic-body contacts. Explicit Goalkeeper._try_catch() snaps ball to chest within catch_radius_m. |
+| 2026-05-15 | T06 | NBA Jam catch-up boost SCHEMA on Goalkeeper. 5 @export params + 2 hooks (`get_effective_reaction_buffer_s`, `is_catchup_eligible` stub). Runtime activation Sprint 9 (requires scoreboard). |
+| 2026-05-15 | T07 | 196/196 PASS, 5.81 s headless. Target ≥145 met +51. Mobile FPS perf pass deferred Sprint 10. |

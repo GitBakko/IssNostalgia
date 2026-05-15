@@ -244,3 +244,27 @@ R09-F01..F04/F06/F07 (juice / aftertouch / NBA-Jam catch-up — Sprint 8/9/Phase
 | R03-F06 (reuse BallLauncher.launch_to_point) | `PassingController.try_pass` → `BallLauncher.compute_velocity_to_point` (refactored from `launch_to_point`) → `compose_spin` override | VALIDATED |
 | R09-F04 (FIFA Animation Warping) | `Player.start_facing_warp(dir, 0.15)` writes target facing + boosts `rotation_speed` to `rotation_speed_warp = 50` for window. Used by `BallController._assign_carrier` AND `PassingController.try_pass` (receiver pre-orientation) | VALIDATED |
 | R01-F07 (FIFA HyperMotion visual/physics decoupling) | `Player.tscn` adds `VisualRoot: Node3D` between CharacterBody3D and meshes. `update_facing` rotates VisualRoot ONLY; `transform.basis` (collision capsule) stays at identity. `Player.get_visual_basis()` / `get_visual_forward()` are the canonical facing accessors. | VALIDATED |
+
+---
+
+## Sprint 08 — Findings Applied
+
+| Finding | How it landed in code | Status |
+|---------|------------------------|--------|
+| R02-F04 (carrier velocity drives kick direction; turn dampen) | `BallController._apply_proximity_kick` walk/sprint factors + `kick_turn_dampen_threshold_deg` / `kick_turn_dampen_factor` | VALIDATED |
+| R02-F05 (touch-cycle dribble, geometric proximity kick) | `BallController._tick_dribble_impulses` + `_apply_proximity_kick` (no glue, kick_proximity_m=0.35, kick_factor walk/sprint = 1.08/1.18) | VALIDATED |
+| R02-F07 (close_control / dribble_skill per-player) | DEFERRED → Sprint 9 (close-control modal button + per-player attribute lookup) | DEFERRED |
+| R04-F01 (reachability two-gate) | `Goalkeeper.compute_save_decision` (t_av + d_eff + move_time_required) | VALIDATED |
+| R04-F02 (commit-early teleport-on-trajectory) | `Goalkeeper._perform_snap` | VALIDATED |
+| R04-F03 (controlled-hesitation reaction delay) | DEFERRED → Phase 3 (Phase 2 teleport is intentional visible cheat) | DEFERRED |
+| R04-F04 (1-axis intercept formula) | `Goalkeeper.compute_save_decision` (kinematic, drag skipped per F04 sufficiency note) | VALIDATED |
+| R04-F05 (idle = ball_x * 0.5 angle bisect) | `Goalkeeper._perform_idle` clamped to `goal_half_width_m` | VALIDATED |
+| R04-F06 (give-up gates outside post / above crossbar) | `Goalkeeper.compute_save_decision` returns `idle` when `abs(intercept_x) > 3.2` OR `predicted_height > 2.44` | VALIDATED |
+| R05-F01 (2 Hz tactical update) | `StaticAI.step` accumulator at `update_hz = 2.0` | VALIDATED |
+| R05-F02 (anchor = Voronoi centroid, role-factor offset) | `StaticAI.tick_targets` | VALIDATED |
+| R05-F03 (role factors GK 0.10 / DEF 0.30 / MID 0.50 / ATT 0.70; event hybrid) | `StaticAI.ROLE_FACTOR_*` constants. Half-change event hybrid DEFERRED → Sprint 9 (T04 spec mandated pure 2 Hz polling). | PARTIAL |
+| R05-F04 (analytical per-agent target, lerp_alpha = dt/1.5) | `Player._drive_toward_static_target` (`STATIC_TARGET_LERP_TAU_S = 1.5`) | VALIDATED |
+| R05-F05 (monotonic role gradient empirically validated) | `test_role_factor_gradient_is_monotonic` | VALIDATED |
+| R05-F06 (max_reposition_speed cap 6–10 m/s by role) | `StaticAI.max_reposition_speed_*` (7/8/9) + `Player.set_static_target(pos, max_speed)` clamp | VALIDATED |
+| R05-F07 (Temporal Voronoi KNN dynamic) | DEFERRED → Phase 3 (per-frame cost incompatible with mobile budget) | DEFERRED |
+| R09-F02 (NBA Jam catch-up boost) | SCHEMA-ONLY: `Goalkeeper.get_effective_reaction_buffer_s` + `is_catchup_eligible` (Sprint 8 stub returns false). Runtime activation Sprint 9 (requires scoreboard). | PARTIAL |
