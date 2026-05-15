@@ -268,3 +268,19 @@ R09-F01..F04/F06/F07 (juice / aftertouch / NBA-Jam catch-up — Sprint 8/9/Phase
 | R05-F06 (max_reposition_speed cap 6–10 m/s by role) | `StaticAI.max_reposition_speed_*` (7/8/9) + `Player.set_static_target(pos, max_speed)` clamp | VALIDATED |
 | R05-F07 (Temporal Voronoi KNN dynamic) | DEFERRED → Phase 3 (per-frame cost incompatible with mobile budget) | DEFERRED |
 | R09-F02 (NBA Jam catch-up boost) | SCHEMA-ONLY: `Goalkeeper.get_effective_reaction_buffer_s` + `is_catchup_eligible` (Sprint 8 stub returns false). Runtime activation Sprint 9 (requires scoreboard). | PARTIAL |
+
+---
+
+## Sprint 09 — Findings Applied
+
+| Finding | How it landed in code | Status |
+|---------|------------------------|--------|
+| R02-F04 (attribute-driven dribble touch interval — extension) | `BallController._apply_proximity_kick` lerps walk/sprint factor between high-skill (1.04 / 1.10) and low-skill (1.12 / 1.26) envelopes by `Player.dribble_skill`. Midpoint 0.5 reproduces Sprint 8 constants. | VALIDATED |
+| R02-F07 (close-control modal + tight control) | `Player.get_effective_carry_offset(speed, base)` and `get_effective_loss_threshold(base)` with opt-in modulation (closeness=0 at default 0.5 + no modal returns base unchanged). `BallController._carry_offset_for_carrier` consumes via API. Input actions `p1_tight_control` (Z) / `p2_tight_control` (Num0). | VALIDATED |
+| R05-F03 (event-driven half-change hybrid — completion) | `StaticAI._check_half_change_event` (signf(ball.z) flip + `min_seconds_between_events = 1.5` + `half_change_min_abs_z = 5.0` wobble buffer); `step()` resets polling timer + ticks immediately on event. Polling 2 Hz path unchanged. | VALIDATED |
+| R09-F02 (NBA Jam catch-up runtime) | `Goalkeeper.is_catchup_eligible` reads `scoreboard.goal_gap_from(my_team_id) ≥ trailing_goal_threshold` AND `match_clock.current_time_remaining_s ≤ time_remaining_threshold_s`. NULL-safe. Default `catchup_boost_enabled = true`. +12.5 % shot-accuracy boost DEFERRED → Sprint 10 (no shot-spread concept yet). | PARTIAL |
+| In-house: MatchClock + Scoreboard | `MatchClock` (240 s default, half-minute / match-ended signals) + `Scoreboard` (TEAM_A/B + goal_scored / score_changed signals + `goal_gap_from` accessor). `GameMatch._spawn_match_state` + `_check_goal_lines` edge-detect ball.z past ±52.5 with 0.5 s lockout. | VALIDATED |
+| Sandbox dev-tool polish | `R` ball reset-to-centre + GK `_last_decision` HUD line. MMB camera reset already wired in S08. | VALIDATED |
+| R06-F03 (camera look-ahead) | DEFERRED → Sprint 10 (camera bundle). | DEFERRED |
+| R06-F07 (SpringArm3D collision) | DEFERRED → Sprint 10 (camera bundle). | DEFERRED |
+| R09-F07 (aftertouch) | DEFERRED → Sprint 10 (touch-input bundle). | DEFERRED |
