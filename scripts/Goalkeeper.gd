@@ -131,6 +131,10 @@ var _last_decision: StringName = &"idle"
 var _post_catch_hold_remaining_s: float = 0.0
 var _debug_return_remaining_s: float = 0.0
 var _debug_return_target: Player = null
+## True while the GK is "holding" the ball (between catch and
+## release). Ball is actively pinned to the chest each tick so
+## gravity / drag don't drop it.
+var _holding_ball: bool = false
 
 
 func _physics_process(delta: float) -> void:
@@ -165,6 +169,7 @@ func step(delta: float) -> void:
 	# fires while we're not already the carrier — avoids re-triggering
 	# every tick while holding the ball.
 	_try_catch()
+	_pin_held_ball()
 	_drain_debug_return(delta)
 
 
@@ -331,6 +336,19 @@ func get_last_decision() -> StringName:
 	return _last_decision
 
 
+## While `_holding_ball` is true, pin the ball to the GK chest
+## every tick. BallPhysics keeps integrating gravity even when
+## possessed (the Sprint 8 T02 rework removed the early-return
+## on `_possessed_by`), so without this the caught ball drops
+## from the chest, bounces, and visually loops back to the GK.
+func _pin_held_ball() -> void:
+	if not _holding_ball or ball == null or goalkeeper == null:
+		return
+	var gp: Vector3 = goalkeeper.global_position
+	ball.teleport_to(Vector3(gp.x, catch_hold_height_m, gp.z))
+	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
+
+
 ## DEBUG — auto-return the held ball to the last shooter once the
 ## hold + return delay elapse. Computes a planar pass velocity
 ## from the GK to the shooter, adds a small lift, fires via
@@ -361,6 +379,7 @@ func _drain_debug_return(dt: float) -> void:
 	# integrator stays in possessed-skip mode and the launch state
 	# never integrates.
 	ball.clear_possession()
+	_holding_ball = false
 	ball.apply_launch_state(v, Vector3.ZERO)
 	_last_decision = &"debug_return"
 
@@ -411,12 +430,10 @@ func _try_catch() -> void:
 	# pickup speed gate).
 	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
 	ball.teleport_to(Vector3(gp.x, catch_hold_height_m, gp.z))
-	# Mark possession so BallController's pickup scan and our own
+	# Mark possession so BallController's pickup scan + our own
 	# `_try_catch` early-out skip the next ticks until release.
-	# (BallController normally skips GKs from pickup, so without
-	# this the ball would re-enter `_try_catch` every tick → the
-	# debug-return timer would never drain.)
 	ball.set_possessed(goalkeeper)
+	_holding_ball = true
 	_last_decision = &"catch"
 	_post_catch_hold_remaining_s = post_catch_hold_s
 	# DEBUG auto-return: capture the shooter so the next pass
