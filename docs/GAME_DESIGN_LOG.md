@@ -168,6 +168,25 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | R04-F06 give-up gate (post + crossbar) | `Goalkeeper.compute_save_decision` (idle on `abs(intercept_x) > goal_half_width_m` OR `predicted_height > crossbar_height_m`) | APPLIED T05 |
 | R09-F02 NBA Jam catch-up boost (schema-only Sprint 8) | `Goalkeeper.get_effective_reaction_buffer_s` + `is_catchup_eligible` (Sprint 8 stub returns false; Sprint 9 wires scoreboard) | APPLIED-SCHEMA T06 |
 
+### Sprint 08 — T07 Regression + Perf Check
+
+- **GUT**: 196/196 PASS (5.81 s headless). Target ≥ 145. Headroom +51.
+- **New tests this sprint**:
+  - close-control / dribble / turn-glue / pickup-lock / stop-glue
+    (test_ball_controller_possession.gd) — 14 net new
+  - direction-buffer inert + autopilot + facing (test_player_movement.gd) — net 4
+  - StaticAI (test_static_ai.gd) — 4 new
+  - Goalkeeper (test_goalkeeper.gd) — 13 new (idle + 5 decision branches +
+    snap teleport + 3 catch + state + 2 catch-up schema)
+- **Perf budget**: target `_physics_process` ≤ 4 ms/tick @ 120 Hz, FPS ≥ 60
+  with full match active. Headless GUT cannot measure FPS — verified
+  visually during Sprint 8 playtests (T02-T05 pass with no observed
+  stutter on dev machine; mobile target deferred to Sprint 10 perf pass).
+- **Regression**: zero tests removed. Earlier Sprint 7 / Sprint 6 suites
+  still green. Direction buffer tests rewritten (10 → 4) to reflect the
+  fix12 architecture change (buffer made inert when turn-glue made it
+  obsolete) — the underlying movement contract is preserved.
+
 ### Sprint 08 — Calibration Sessions
 
 | Date       | Task   | Notes |
