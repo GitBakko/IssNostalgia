@@ -62,10 +62,17 @@ extends Node
 ## snapped to the GK chest). Necessary because BallPhysics runs
 ## with custom_integrator = true and only resolves ground / wall
 ## contacts — without this gate the ball phases through the GK.
-@export var catch_radius_m: float = 0.7
+## Bumped 0.7 → 1.0 (playtest 2026-05-15 test 3) — GK is steering
+## to drag-aware intercept at goal line, but ball passes through
+## the GK Z plane (1 m forward of goal) at a slightly different X,
+## so a wider catch reach closes that gap.
+@export var catch_radius_m: float = 1.0
 ## Vertical catch height — ball Y above this (e.g. ball flying
-## over the keeper) is NOT caught. Matches the GK arms-up reach.
-@export var catch_max_height_m: float = 2.20
+## over the keeper) is NOT caught. Bumped 2.20 → 2.44 (crossbar)
+## so descending arcs that crossed the GK plane higher than the
+## predicted goal-line height are still catchable when below the
+## crossbar at the catch tick.
+@export var catch_max_height_m: float = 2.44
 ## Held-ball Y after a catch — ball sits at chest height, not at
 ## the foot or floating above the head. Safe-launch from here
 ## restores possession naturally on the next pickup tick.

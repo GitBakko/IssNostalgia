@@ -239,7 +239,7 @@ func _spawn_team_shoot_pass(root: Node3D, tc: TeamController, label: String) -> 
 	sc.name = "ShootingController" + label
 	sc.team_controller = tc
 	sc.ball_controller = ball_controller
-	sc.debug_log = false  ## T05 diagnostic — flip true when re-debugging
+	sc.debug_log = true  ## T05 sandbox diagnostic — strip before ship
 	root.add_child(sc)
 	var pc: PassingController = PassingController.new()
 	pc.name = "PassingController" + label
