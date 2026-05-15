@@ -46,6 +46,19 @@ const ROLE_FACTOR_ATT: float = 0.70
 ## Tactical update rate (Hz). 2 Hz matches R05-F01 (Dave Mark — Game AI
 ## Pro 2 Ch.30) — tactical layer doesn't need per-frame updates.
 @export var update_hz: float = 2.0
+
+@export_group("Half-change event hybrid (R05-F03)")
+## Sprint 9 T05 — event trigger when the ball crosses the centre
+## line. Forces an immediate re-tick of formation targets outside
+## the polling cadence, so the AI doesn't wait up to 0.5 s to
+## react to a possession swap.
+@export var half_change_event_enabled: bool = true
+## Minimum seconds between event-driven triggers. Polling at 2 Hz
+## still runs in between. Per F03 spec ("min_interval = 1.5s").
+@export var min_seconds_between_events: float = 1.5
+## Ball |z| must exceed this for a half-change to count. Ignores
+## wobbles around the centre line (kickoff, midfield contests).
+@export var half_change_min_abs_z: float = 5.0
 ## Per-role max reposition speed (m/s, R05-F06). 0.0 = no override
 ## (Player default speeds). Velocity clamping prevents teleport feel.
 @export var max_reposition_speed_def: float = 7.0
@@ -54,6 +67,8 @@ const ROLE_FACTOR_ATT: float = 0.70
 
 # ---- Runtime state -------------------------------------------------------
 var _update_timer_s: float = 0.0
+var _last_ball_half: int = 0  ## -1 / +1, 0 = uninitialised
+var _seconds_since_last_event: float = INF
 
 
 func _physics_process(delta: float) -> void:
@@ -62,17 +77,54 @@ func _physics_process(delta: float) -> void:
 
 ## Tick the tactical timer; on overflow recompute targets and push them
 ## to the players. Pure-on-instance — tests drive `step(delta)` directly.
+##
+## Two trigger paths (R05-F03 hybrid):
+##   - Polling: 2 Hz timer (R05-F01 cadence)
+##   - Event: ball crosses centre line into the other half →
+##     forces an immediate re-tick, gated by
+##     `min_seconds_between_events` (1.5 s) so a wobbling ball
+##     can't spam updates.
 func step(delta: float) -> void:
 	if team_controller == null or ball_ref == null or formation == null:
 		return
 	if team_controller.is_human:
 		return
+	_seconds_since_last_event += delta
+	var event_fired: bool = _check_half_change_event()
 	var interval: float = 1.0 / maxf(update_hz, 0.1)
 	_update_timer_s += delta
+	if event_fired:
+		_update_timer_s = 0.0
+		tick_targets()
+		return
 	if _update_timer_s < interval:
 		return
 	_update_timer_s = 0.0
 	tick_targets()
+
+
+## R05-F03 — detect a centre-line crossing. Returns true iff the
+## event should force a re-tick this frame. Updates `_last_ball_half`
+## on every meaningful sample (|z| > threshold) so the next call
+## has a fresh baseline.
+func _check_half_change_event() -> bool:
+	if not half_change_event_enabled:
+		return false
+	var z: float = ball_ref.global_position.z
+	if absf(z) < half_change_min_abs_z:
+		return false  ## inside the centre-line buffer — ignore wobble
+	var half_now: int = -1 if z < 0.0 else 1
+	if _last_ball_half == 0:
+		_last_ball_half = half_now
+		return false  ## first sample — establish baseline only
+	if half_now == _last_ball_half:
+		return false
+	# Half changed — gate by min interval.
+	_last_ball_half = half_now
+	if _seconds_since_last_event < min_seconds_between_events:
+		return false
+	_seconds_since_last_event = 0.0
+	return true
 
 
 ## Recompute the formation target for every non-GK player on this team
