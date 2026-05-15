@@ -209,14 +209,12 @@ func _spawn_ball_controllers() -> void:
 	add_child(ball_controller)
 	# Wire back-refs into the goalkeepers (spawned before this — the
 	# ball_controller export is needed for the debug auto-return).
-	# Enable GK debug log in sandbox sessions so decision branches
-	# print during playtests. Strip / set false before ship.
+	# Debug flags are OFF in shipping builds; flip per-instance from
+	# the inspector when re-debugging GK behaviour.
 	if team_a_goalkeeper != null:
 		team_a_goalkeeper.ball_controller = ball_controller
-		team_a_goalkeeper.debug_log = true
 	if team_b_goalkeeper != null:
 		team_b_goalkeeper.ball_controller = ball_controller
-		team_b_goalkeeper.debug_log = true
 	# 1 BallLauncher per match — used by PassingControllers to compute
 	# lob velocity via the iterative drag-aware solver.
 	ball_launcher = BallLauncher.new()
@@ -239,7 +237,7 @@ func _spawn_team_shoot_pass(root: Node3D, tc: TeamController, label: String) -> 
 	sc.name = "ShootingController" + label
 	sc.team_controller = tc
 	sc.ball_controller = ball_controller
-	sc.debug_log = true  ## T05 sandbox diagnostic — strip before ship
+	sc.debug_log = false  ## flip via inspector when re-debugging shots
 	root.add_child(sc)
 	var pc: PassingController = PassingController.new()
 	pc.name = "PassingController" + label

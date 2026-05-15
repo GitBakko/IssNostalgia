@@ -94,12 +94,13 @@ extends Node
 @export var gravity_m_s2: float = 9.81
 
 @export_group("DEBUG — auto-return ball to last shooter (TEMP playtest)")
-## TEMP playtest aid 2026-05-15. After a catch + post_catch_hold_s,
-## the GK kicks the ball back toward the player who last called
+## Playtest aid: after a catch + post_catch_hold_s, the GK kicks
+## the ball back toward the player who last called
 ## `BallController.request_release` (i.e. the shooter). Lets a
 ## solo human iterate "shoot → save → return → shoot" without
-## having to walk to the ball each time.
-@export var debug_return_ball_enabled: bool = true
+## having to walk to the ball each time. DEFAULT OFF — opt in
+## per-match via the inspector or `GameMatch._spawn_goalkeeper`.
+@export var debug_return_ball_enabled: bool = false
 ## Extra delay AFTER `post_catch_hold_s` before the auto-return
 ## fires. Total time from catch to kick = post_catch_hold_s +
 ## debug_return_delay_s.
