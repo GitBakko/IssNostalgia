@@ -333,12 +333,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		_apply_replay_entry(state)
 		return
 	_apply_pending_state(state)
-	# S07-D01: while a Player possesses the ball, BallController owns the
-	# transform and we skip every force / collision step. KINEMATIC freeze
-	# also stops Godot's auto-advance, so the auto-advance compensation
-	# at the bottom of this method is unnecessary too — early-return.
-	if _possessed_by != null:
-		return
+	# S08-T02-rework: ball stays LIVE during possession (R02-F05 Arch B).
+	# Removed the early-return on `_possessed_by != null` so forces +
+	# collisions integrate normally; BallController nudges the ball with
+	# periodic apply_launch_state impulses instead of glueing it.
 	var dt: float = state.step
 	var speed: float = state.linear_velocity.length()
 	_current_substeps = compute_substeps(speed)
@@ -404,10 +402,17 @@ func apply_launch_state(linear: Variant, angular: Variant = null) -> void:
 ## carrier doesn't inherit a stale velocity from a prior shot. The actual
 ## carry-position sync is BallController's job.
 func set_possessed(by_node: Node3D) -> void:
+	# S08-T02-rework (R02-F05 Architecture B): ball stays LIVE during
+	# possession — no freeze, no collision change. The carrier flag is
+	# logical (used by shoot/pass eligibility, auto-switch). Ball physics
+	# keeps integrating; BallController emits periodic touch impulses to
+	# steer it. Drag + rolling friction handle deceleration naturally
+	# when the carrier slows.
 	_possessed_by = by_node
+	# Clear stale pending launch state so a prior shot's velocity
+	# doesn't leak into the new carrier's first frame.
 	_pending_linear = Vector3.ZERO
 	_pending_angular = Vector3.ZERO
-	set_deferred("freeze", true)
 
 
 ## Release the ball with the given launch velocity (m/s, NOT a force-
@@ -416,9 +421,11 @@ func set_possessed(by_node: Node3D) -> void:
 ## state via the existing `apply_launch_state` path, and emits the
 ## `released` signal once the next tick begins (call_deferred).
 func release(velocity: Vector3, angular: Vector3 = Vector3.ZERO) -> void:
+	# S08-T02-rework: no freeze toggle, no collision restore — the ball
+	# was never frozen in the new always-live model. Just clear the
+	# carrier flag and stage the launch velocity.
 	var releaser: Node3D = _possessed_by
 	_possessed_by = null
-	set_deferred("freeze", false)
 	apply_launch_state(velocity, angular)
 	# Defer the signal so listeners read the post-release state, not the
 	# mid-release transition. emit_signal is safe to defer; receivers
@@ -432,6 +439,15 @@ func is_possessed() -> bool:
 
 func get_possessor() -> Node3D:
 	return _possessed_by
+
+
+## Clear the possession flag WITHOUT staging a launch — used by
+## BallController on loss-threshold drift so the ball can be re-picked
+## up by anyone (including the same carrier who just lost it). The
+## ball keeps its current velocity; loss is "the foot couldn't keep up",
+## not "an intentional kick", so we don't override motion.
+func clear_possession() -> void:
+	_possessed_by = null
 
 
 # ---- Replay / frame-step (Sprint 5 T06) ----------------------------------

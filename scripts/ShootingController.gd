@@ -40,6 +40,16 @@ extends Node
 @export var elev_min_deg: float = 8.0
 @export var elev_max_deg: float = 12.0
 
+@export_group("Lob (when lob_modifier action is held on release)")
+## Higher elevation envelope used when the lob modifier (`L` key
+## by default) is held during the shoot release. Lets the human
+## sandbox-test lob saves / over-the-bar shots.
+@export var lob_elev_min_deg: float = 30.0
+@export var lob_elev_max_deg: float = 50.0
+## Slower ceiling for lobs — keeps them readable, prevents the
+## shot landing wide when the high arc converts speed to height.
+@export var lob_speed_max: float = 22.0
+
 @export_group("Spin")
 ## Above this launch speed apply auto-topspin (S07-D05).
 @export var auto_topspin_threshold: float = 20.0
@@ -65,7 +75,9 @@ var _shoot_anim_remaining_s: float = 0.0
 ## clamped or raw) charge duration and `dir_input` as the analog WASD
 ## input vector. No-op when the active player isn't carrying the ball
 ## or when the hold is below `charge_min_s`. Returns true on success.
-func fire_shot(hold_s: float, dir_input: Vector3) -> bool:
+## When `is_lob` is true, uses `lob_elev_*` and `lob_speed_max` so the
+## same charge curve produces a high-arc lob instead of a driven shot.
+func fire_shot(hold_s: float, dir_input: Vector3, is_lob: bool = false) -> bool:
 	if hold_s < charge_min_s:
 		if debug_log:
 			print("[ShootingController] reject: hold %.2fs < min %.2fs" % [hold_s, charge_min_s])
@@ -89,8 +101,12 @@ func fire_shot(hold_s: float, dir_input: Vector3) -> bool:
 		0.0, 1.0,
 	)
 	var power_norm: float = pow(t_norm, charge_curve_exponent)
-	var speed: float = lerpf(speed_min, speed_max, power_norm)
-	var elev_deg: float = lerpf(elev_min_deg, elev_max_deg, power_norm)
+	var effective_speed_max: float = lob_speed_max if is_lob else speed_max
+	var effective_elev_min: float = lob_elev_min_deg if is_lob else elev_min_deg
+	var effective_elev_max: float = lob_elev_max_deg if is_lob else elev_max_deg
+	var speed: float = lerpf(speed_min, effective_speed_max, power_norm)
+	var elev_deg: float = lerpf(effective_elev_min, effective_elev_max,
+		power_norm)
 	var dir: Vector3 = _resolve_shot_direction(shooter, dir_input)
 
 	var rad: float = deg_to_rad(elev_deg)
@@ -102,7 +118,7 @@ func fire_shot(hold_s: float, dir_input: Vector3) -> bool:
 	if speed > auto_topspin_threshold:
 		spin = BallLauncher.compose_spin(dir, auto_topspin_rad_s, 0.0, 0.0)
 
-	ball_controller.request_release(launch_velocity, spin)
+	ball_controller.request_release(launch_velocity, spin, BallController.ReleaseKind.SHOOT)
 
 	# Auto-switch gate (S06 spec A2) + Player state for HUD / debug
 	_shoot_anim_remaining_s = shoot_anim_duration_s
@@ -153,10 +169,16 @@ func _physics_process(delta: float) -> void:
 		)
 		charge_changed.emit(t_norm)
 	elif _is_charging:
-		# Released — fire if eligible, then reset.
+		# Released — fire if eligible, then reset. Lob modifier is
+		# polled at release so the player can decide grounder vs
+		# lob mid-charge by holding/releasing the modifier key.
+		var is_lob: bool = Input.is_action_pressed(_full_action(ctrl,
+			&"lob_modifier"))
 		if debug_log:
-			print("[ShootingController] RELEASE after %.2fs" % _charge_hold_s)
-		fire_shot(_charge_hold_s, ctrl.read_movement_input())
+			print("[ShootingController] RELEASE after %.2fs (lob=%s)" % [
+				_charge_hold_s, is_lob,
+			])
+		fire_shot(_charge_hold_s, ctrl.read_movement_input(), is_lob)
 		_reset_charge()
 		charge_changed.emit(0.0)
 

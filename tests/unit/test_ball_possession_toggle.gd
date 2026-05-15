@@ -110,3 +110,28 @@ func test_release_with_no_possessor_still_stages_velocity() -> void:
 	await get_tree().process_frame
 	assert_eq(captured_releaser, null,
 		"released signal carries null releaser when no prior possession")
+
+
+# ---- S08-T02-rework collision invariant --------------------------------
+
+func test_possession_keeps_collision_layer_and_mask_unchanged() -> void:
+	# R02-F05 Architecture B: the ball stays LIVE during possession —
+	# no freeze, no collision change. This test locks in the invariant.
+	# (Previous Sprint 8 attempt zeroed collision; the always-live
+	# rework removed that hack along with the freeze hack.)
+	var saved_layer: int = ball.collision_layer
+	var saved_mask: int = ball.collision_mask
+	ball.set_possessed(stub_carrier)
+	assert_eq(ball.collision_layer, saved_layer,
+		"Possession must NOT zero collision_layer (always-live model)")
+	assert_eq(ball.collision_mask, saved_mask,
+		"Possession must NOT zero collision_mask (always-live model)")
+	ball.release(Vector3(8.0, 4.0, 0.0))
+	assert_eq(ball.collision_layer, saved_layer)
+	assert_eq(ball.collision_mask, saved_mask)
+
+
+func test_possession_does_not_freeze_ball() -> void:
+	ball.set_possessed(stub_carrier)
+	assert_false(ball.freeze,
+		"Possession must NOT freeze the ball (always-live model)")
