@@ -209,10 +209,14 @@ func _spawn_ball_controllers() -> void:
 	add_child(ball_controller)
 	# Wire back-refs into the goalkeepers (spawned before this — the
 	# ball_controller export is needed for the debug auto-return).
+	# Enable GK debug log in sandbox sessions so decision branches
+	# print during playtests. Strip / set false before ship.
 	if team_a_goalkeeper != null:
 		team_a_goalkeeper.ball_controller = ball_controller
+		team_a_goalkeeper.debug_log = true
 	if team_b_goalkeeper != null:
 		team_b_goalkeeper.ball_controller = ball_controller
+		team_b_goalkeeper.debug_log = true
 	# 1 BallLauncher per match — used by PassingControllers to compute
 	# lob velocity via the iterative drag-aware solver.
 	ball_launcher = BallLauncher.new()

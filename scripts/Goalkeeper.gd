@@ -139,6 +139,17 @@ var _holding_ball: bool = false
 ## re-grab the just-launched ball (it's still at the GK position
 ## the same tick the launch fires — gravity hasn't moved it yet).
 var _post_release_lockout_s: float = 0.0
+## True when the latest decision was IDLE because the give-up
+## gates fired (intercept outside save zone OR predicted height
+## above crossbar) — i.e. an actual shot the GK has decided is
+## unsavable. Used to hold position instead of drifting toward
+## the off-target ball (playtest 2026-05-15 test 5).
+var _giving_up_on_shot: bool = false
+## Optional debug log — prints decision branch + intercept on
+## every state change. Off by default; flip true at runtime to
+## diagnose "GK didn't react to my shot" issues.
+@export var debug_log: bool = false
+var _last_logged_decision: StringName = &""
 
 
 func _physics_process(delta: float) -> void:
@@ -160,6 +171,21 @@ func step(delta: float) -> void:
 	# kinematic path.
 	var save_data: Dictionary = _predict_intercept_drag_aware(ball_pos, ball_v)
 	_last_decision = save_data.get("decision", &"idle")
+	# Detect "giving up on a shot": ball IS heading toward our goal
+	# inside the shot zone (so a t_flight + intercept_x were computed)
+	# but the gates rejected it. In that case hold position — don't
+	# drift toward an off-target ball that's missing anyway.
+	_giving_up_on_shot = _last_decision == &"idle" \
+		and not is_nan(save_data.get("intercept_x", NAN))
+	if debug_log and _last_decision != _last_logged_decision:
+		print("[GK %s] %s  intercept_x=%s  height=%s  t=%s  giving_up=%s" % [
+			goalkeeper.name, _last_decision,
+			save_data.get("intercept_x", NAN),
+			save_data.get("predicted_height", 0.0),
+			save_data.get("t_flight", 0.0),
+			_giving_up_on_shot,
+		])
+		_last_logged_decision = _last_decision
 	match _last_decision:
 		&"snap":
 			_perform_snap(save_data.intercept_x)
@@ -300,6 +326,13 @@ func _perform_idle(ball_pos: Vector3, dt: float) -> void:
 		_post_catch_hold_remaining_s = maxf(0.0,
 			_post_catch_hold_remaining_s - dt)
 		# Hold position; stay at current X.
+		goalkeeper.global_position = Vector3(current.x, current.y, target_z)
+		goalkeeper.velocity = Vector3.ZERO
+		goalkeeper.mark_driven()
+		return
+	if _giving_up_on_shot:
+		# Off-target shot — don't waste energy chasing the ball
+		# across the goal. Hold current X. (Test 5 playtest 2026-05-15.)
 		goalkeeper.global_position = Vector3(current.x, current.y, target_z)
 		goalkeeper.velocity = Vector3.ZERO
 		goalkeeper.mark_driven()

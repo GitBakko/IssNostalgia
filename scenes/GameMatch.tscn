@@ -52,7 +52,7 @@ shadow_enabled = true
 collision_mask = 0
 
 [node name="PitchMesh" type="MeshInstance3D" parent="Pitch" unique_id=853200694]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.060958147, -0.011637688, 0.040546417)
+transform = Transform3D(0.9496937, 0, 0.3131804, 0, 1, 0, -0.3131804, 0, 0.9496937, -0.10293627, -0.02909547, 0.07434511)
 material_override = SubResource("Mat_pitch")
 mesh = SubResource("PlaneMesh_pitch")
 
@@ -111,8 +111,8 @@ theme_override_colors/font_color = Color(1, 1, 1, 0.85)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
 theme_override_constants/outline_size = 3
 theme_override_font_sizes/font_size = 14
-text = "P1: Arrows move   Shift sprint   Q switch   Space charge   E pass
-P2 (both_human=true): WASD move   RShift sprint   NumEnter switch   Num+ charge   Num- pass
+text = "P1: Arrows move   Shift sprint   Q switch   Space charge   E pass   L+Space lob
+P2 (both_human=true): WASD move   RShift sprint   NumEnter switch   Num+ charge   Num- pass   Num. lob
 debug ball: [ X-   ] X+   ; Z-   ' Z+   B random
 camera: Mouse-Wheel zoom   RMB-drag orbit   MMB reset
 ESC quit"

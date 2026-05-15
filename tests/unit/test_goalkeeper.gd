@@ -276,6 +276,31 @@ func test_post_catch_hold_freezes_gk_position() -> void:
 		"During hold, GK X must not change despite ball X change")
 
 
+func test_idle_holds_position_when_giving_up_on_wide_shot() -> void:
+	# Wide diagonal — intercept beyond save_zone → idle. GK must
+	# HOLD position, not drift toward the off-target ball
+	# (test 5 playtest 2026-05-15).
+	gk_player.global_position = Vector3(0.0, 0.0, -51.5)
+	# Trigger a give-up via predict: ball at (0, 0.3, -45), vel
+	# (15, 0, -10) → t_flight = 1.0 s, intercept_x kinematic = 15.
+	# Way outside save_zone (3.9). Decision = idle, but we stayed
+	# in shot zone so _giving_up_on_shot must arm.
+	ball.global_position = Vector3(0.0, 0.3, -45.0)
+	ball.linear_velocity = Vector3(15.0, 0.0, -10.0)
+	gk.step(1.0 / 120.0)
+	assert_eq(gk.get_last_decision(), &"idle")
+	assert_true(gk._giving_up_on_shot,
+		"Wide-shot give-up must set _giving_up_on_shot")
+	var x_before: float = gk_player.global_position.x
+	# Now move ball further wide and tick — GK X must NOT drift.
+	for _i in 30:  ## 0.25 s
+		ball.global_position = Vector3(ball.global_position.x + 0.5,
+			ball.global_position.y, ball.global_position.z)
+		gk.step(1.0 / 120.0)
+	assert_almost_eq(gk_player.global_position.x, x_before, 0.001,
+		"Give-up hold must keep GK X frozen")
+
+
 # ---- DEBUG auto-return-to-shooter (TEMP playtest aid) ------------------
 
 func test_debug_return_kicks_ball_back_to_last_shooter() -> void:
