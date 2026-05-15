@@ -276,6 +276,49 @@ func test_post_catch_hold_freezes_gk_position() -> void:
 		"During hold, GK X must not change despite ball X change")
 
 
+# ---- DEBUG auto-return-to-shooter (TEMP playtest aid) ------------------
+
+func test_debug_return_kicks_ball_back_to_last_shooter() -> void:
+	# Stub a ball_controller that reports a fake shooter.
+	var shooter: Player = preload("res://scenes/Player.tscn").instantiate() as Player
+	add_child(shooter)
+	shooter.global_position = Vector3(0.0, 0.0, -10.0)  ## up-pitch from GK
+	# Minimal BallController stand-in: only need get_last_released_carrier.
+	var bc: BallController = BallController.new()
+	bc.ball = ball
+	bc._last_released_carrier = shooter
+	add_child(bc)
+	gk.ball_controller = bc
+	gk.debug_return_ball_enabled = true
+	gk.debug_return_delay_s = 0.1  ## tighten test
+	gk.post_catch_hold_s = 0.05
+	# Trigger a catch.
+	gk_player.global_position = Vector3(2.0, 0.0, -51.5)
+	ball.global_position = Vector3(2.0, 0.4, -51.5)
+	ball.linear_velocity = Vector3.ZERO
+	gk.step(1.0 / 120.0)
+	assert_eq(gk.get_last_decision(), &"catch")
+	assert_eq(gk._debug_return_target, shooter,
+		"Debug return must capture the last shooter on catch")
+	# Drain the timer.
+	for _i in 30:  ## 0.25 s — well past 0.05 + 0.1 = 0.15 s
+		ball._pending_linear = null
+		gk.step(1.0 / 120.0)
+		if gk.get_last_decision() == &"debug_return":
+			break
+	assert_eq(gk.get_last_decision(), &"debug_return",
+		"Debug return must fire after post_catch_hold + debug_return_delay")
+	assert_not_null(ball._pending_linear,
+		"Debug return must stage a launch velocity")
+	var v: Vector3 = ball._pending_linear as Vector3
+	assert_gt(v.z, 0.0,
+		"Pass velocity must point toward shooter (positive Z from GK at -Z goal)")
+	assert_gt(v.y, 0.0,
+		"Pass must include a small lift component")
+	bc.queue_free()
+	shooter.queue_free()
+
+
 # ---- T06 NBA Jam catch-up boost (R09-F02 — schema only) ----------------
 
 func test_catchup_boost_disabled_by_default() -> void:

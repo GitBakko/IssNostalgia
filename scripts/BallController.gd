@@ -190,6 +190,11 @@ var _pickup_lockout_remaining_s: float = 0.0
 var _kick_lockout_remaining_s: float = 0.0
 ## Direction of the previous kick — used to detect turn for #4 dampen.
 var _last_kick_direction: Vector3 = Vector3.ZERO
+## Most recent player to call `request_release` on this controller.
+## Used by Goalkeeper.gd's debug auto-return-to-shooter feature so
+## the keeper knows whom to pass back to. Persists across pickups
+## until another release fires.
+var _last_released_carrier: Player = null
 ## Last carry direction (visual+velocity blend) for turn-glue rotation
 ## detection. Cleared on possession change.
 var _last_carry_dir: Vector3 = Vector3.ZERO
@@ -217,6 +222,12 @@ func is_carried() -> bool:
 	return _carrier != null
 
 
+## Most recent player to call `request_release` on this controller.
+## Reset each release. Used by Goalkeeper debug auto-return.
+func get_last_released_carrier() -> Player:
+	return _last_released_carrier
+
+
 ## Proxy for shoot / pass triggers. Releases the ball with a launch
 ## velocity and arms the anti re-grab lockout (Sprint 7 fix2). The
 ## kind argument is informational for logging / future per-release
@@ -229,6 +240,7 @@ func request_release(velocity: Vector3, angular: Vector3 = Vector3.ZERO,
 		print("[BallController] RELEASE (%s) by %s, |v|=%.2f m/s, |ω|=%.2f rad/s" % [
 			ReleaseKind.keys()[kind], _carrier.name, velocity.length(), angular.length(),
 		])
+	_last_released_carrier = _carrier
 	_clear_carrier_flag()
 	_clear_collision_exception()
 	_carrier = null

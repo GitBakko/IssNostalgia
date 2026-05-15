@@ -86,6 +86,27 @@ extends Node
 ## Gravity used in the predicted-height calc. Matches project gravity.
 @export var gravity_m_s2: float = 9.81
 
+@export_group("DEBUG — auto-return ball to last shooter (TEMP playtest)")
+## TEMP playtest aid 2026-05-15. After a catch + post_catch_hold_s,
+## the GK kicks the ball back toward the player who last called
+## `BallController.request_release` (i.e. the shooter). Lets a
+## solo human iterate "shoot → save → return → shoot" without
+## having to walk to the ball each time.
+@export var debug_return_ball_enabled: bool = true
+## Extra delay AFTER `post_catch_hold_s` before the auto-return
+## fires. Total time from catch to kick = post_catch_hold_s +
+## debug_return_delay_s.
+@export var debug_return_delay_s: float = 1.0
+## Planar speed (m/s) of the auto-return pass.
+@export var debug_return_pass_speed_m_s: float = 14.0
+## Vertical kick component (m/s) — slight arc so the pass clears
+## the ground roughness and reads as a real kick.
+@export var debug_return_pass_lift_m_s: float = 1.5
+## BallController ref — needed to read the last shooter and stay
+## aware of possession state. Wired by GameMatch after the
+## controller is instantiated.
+@export var ball_controller: BallController
+
 @export_group("NBA Jam catch-up boost (R09-F02 — schema only)")
 ## T06 schema only — eligibility wiring requires the scoreboard
 ## (Sprint 9). When `false` (default) all catch-up modifiers are
@@ -108,6 +129,8 @@ extends Node
 # ---- Runtime state -------------------------------------------------------
 var _last_decision: StringName = &"idle"
 var _post_catch_hold_remaining_s: float = 0.0
+var _debug_return_remaining_s: float = 0.0
+var _debug_return_target: Player = null
 
 
 func _physics_process(delta: float) -> void:
@@ -142,6 +165,7 @@ func step(delta: float) -> void:
 	# fires while we're not already the carrier — avoids re-triggering
 	# every tick while holding the ball.
 	_try_catch()
+	_drain_debug_return(delta)
 
 
 ## Pure decision function. Returns a dict with:
@@ -307,6 +331,40 @@ func get_last_decision() -> StringName:
 	return _last_decision
 
 
+## DEBUG — auto-return the held ball to the last shooter once the
+## hold + return delay elapse. Computes a planar pass velocity
+## from the GK to the shooter, adds a small lift, fires via
+## `BallPhysics.apply_launch_state`. Skipped when target is gone
+## (despawned mid-window) or BallController state changed.
+func _drain_debug_return(dt: float) -> void:
+	if _debug_return_remaining_s <= 0.0:
+		return
+	_debug_return_remaining_s = maxf(0.0, _debug_return_remaining_s - dt)
+	if _debug_return_remaining_s > 0.0:
+		return
+	var target: Player = _debug_return_target
+	_debug_return_target = null
+	if target == null or not is_instance_valid(target):
+		return
+	if ball == null or goalkeeper == null:
+		return
+	var to: Vector3 = target.global_position - goalkeeper.global_position
+	to.y = 0.0
+	var dist: float = to.length()
+	if dist < 0.1:
+		return
+	var dir: Vector3 = to / dist
+	var v: Vector3 = Vector3(dir.x * debug_return_pass_speed_m_s,
+		debug_return_pass_lift_m_s,
+		dir.z * debug_return_pass_speed_m_s)
+	# Release possession before launching; otherwise the BallPhysics
+	# integrator stays in possessed-skip mode and the launch state
+	# never integrates.
+	ball.clear_possession()
+	ball.apply_launch_state(v, Vector3.ZERO)
+	_last_decision = &"debug_return"
+
+
 ## R09-F02 schema hook — return the reaction buffer to use in the
 ## reachability gate, optionally scaled by the catch-up boost when
 ## eligible. In Sprint 8 the eligibility check is a stub that
@@ -353,5 +411,19 @@ func _try_catch() -> void:
 	# pickup speed gate).
 	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
 	ball.teleport_to(Vector3(gp.x, catch_hold_height_m, gp.z))
+	# Mark possession so BallController's pickup scan and our own
+	# `_try_catch` early-out skip the next ticks until release.
+	# (BallController normally skips GKs from pickup, so without
+	# this the ball would re-enter `_try_catch` every tick → the
+	# debug-return timer would never drain.)
+	ball.set_possessed(goalkeeper)
 	_last_decision = &"catch"
 	_post_catch_hold_remaining_s = post_catch_hold_s
+	# DEBUG auto-return: capture the shooter so the next pass
+	# lands at their feet. Only arms when the BallController and
+	# the feature flag are both available.
+	if debug_return_ball_enabled and ball_controller != null:
+		var shooter: Player = ball_controller.get_last_released_carrier()
+		if shooter != null and is_instance_valid(shooter):
+			_debug_return_target = shooter
+			_debug_return_remaining_s = post_catch_hold_s + debug_return_delay_s

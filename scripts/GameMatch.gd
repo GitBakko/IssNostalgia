@@ -207,6 +207,12 @@ func _spawn_ball_controllers() -> void:
 	ball_controller.teams = teams_arr
 	ball_controller.debug_log = false  ## T05 diagnostic — flip true when re-debugging
 	add_child(ball_controller)
+	# Wire back-refs into the goalkeepers (spawned before this — the
+	# ball_controller export is needed for the debug auto-return).
+	if team_a_goalkeeper != null:
+		team_a_goalkeeper.ball_controller = ball_controller
+	if team_b_goalkeeper != null:
+		team_b_goalkeeper.ball_controller = ball_controller
 	# 1 BallLauncher per match — used by PassingControllers to compute
 	# lob velocity via the iterative drag-aware solver.
 	ball_launcher = BallLauncher.new()
