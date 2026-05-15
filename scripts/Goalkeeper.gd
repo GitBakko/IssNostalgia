@@ -49,8 +49,20 @@ extends Node
 ## before comparing to the GK movement budget.
 @export var reaction_buffer_s: float = 0.05
 ## Catch radius — extends GK reach by this amount on the X axis
-## (R04-F01 d_eff = max(0, d_lat - r)).
+## (R04-F01 d_eff = max(0, d_lat - r)) AND defines the actual
+## catch zone: when the ball is within this XZ distance of the GK
+## centre, the ball is intercepted (velocity zeroed, position
+## snapped to the GK chest). Necessary because BallPhysics runs
+## with custom_integrator = true and only resolves ground / wall
+## contacts — without this gate the ball phases through the GK.
 @export var catch_radius_m: float = 0.7
+## Vertical catch height — ball Y above this (e.g. ball flying
+## over the keeper) is NOT caught. Matches the GK arms-up reach.
+@export var catch_max_height_m: float = 2.20
+## Held-ball Y after a catch — ball sits at chest height, not at
+## the foot or floating above the head. Safe-launch from here
+## restores possession naturally on the next pickup tick.
+@export var catch_hold_height_m: float = 0.90
 ## Min ball speed toward goal (Z component magnitude) to consider
 ## the shot a "save scenario". Below this the ball is loose / pass
 ## and the GK stays in idle mode.
@@ -83,6 +95,12 @@ func step(delta: float) -> void:
 			_perform_save(save_data.intercept_x, delta)
 		_:
 			_perform_idle(ball_pos, delta)
+	# Catch gate runs every tick AFTER positioning. The ball would
+	# otherwise phase through the GK capsule (BallPhysics custom
+	# integrator only resolves ground / wall contacts). Catch only
+	# fires while we're not already the carrier — avoids re-triggering
+	# every tick while holding the ball.
+	_try_catch()
 
 
 ## Pure decision function. Returns a dict with:
@@ -175,3 +193,31 @@ func _perform_snap(intercept_x: float) -> void:
 ## Read-only accessor for tests / HUD.
 func get_last_decision() -> StringName:
 	return _last_decision
+
+
+## Explicit catch resolution — needed because BallPhysics runs with
+## custom_integrator and skips dynamic-body contact response. When
+## the ball is inside `catch_radius_m` (XZ) AND below
+## `catch_max_height_m`, snap it to the GK chest and zero velocity.
+## Skipped while the GK is already the ball carrier (avoids
+## re-trigger every tick).
+func _try_catch() -> void:
+	if ball == null or goalkeeper == null:
+		return
+	if ball.get_possessor() == goalkeeper:
+		return
+	var bp: Vector3 = ball.global_position
+	var gp: Vector3 = goalkeeper.global_position
+	if bp.y > catch_max_height_m:
+		return
+	var dx: float = bp.x - gp.x
+	var dz: float = bp.z - gp.z
+	if dx * dx + dz * dz > catch_radius_m * catch_radius_m:
+		return
+	# Stop the ball at the GK chest. BallController's pickup scan
+	# will then naturally reassign possession to the GK on the next
+	# tick (the ball is now inside the pickup radius and below the
+	# pickup speed gate).
+	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
+	ball.teleport_to(Vector3(gp.x, catch_hold_height_m, gp.z))
+	_last_decision = &"catch"

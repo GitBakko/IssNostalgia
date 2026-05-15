@@ -145,6 +145,53 @@ func test_snap_teleports_gk_to_intercept_x() -> void:
 		"On snap, GK X must equal intercept_x")
 
 
+func test_catch_intercepts_ball_inside_radius() -> void:
+	# Ball at GK position, low Y, with velocity → catch fires and
+	# zeroes velocity, snaps ball to GK chest. Place ball where it
+	# stays within catch_radius even after _perform_idle moves the
+	# GK to (small_lerp_x, *, goal_z + idle_forward_offset).
+	gk_player.global_position = Vector3(0.0, 0.0, -51.5)
+	ball.global_position = Vector3(0.1, 0.4, -51.5)  ## directly at GK
+	ball.linear_velocity = Vector3(5.0, 0.0, -3.0)
+	ball._pending_linear = null
+	ball._pending_teleport = null
+	gk.step(1.0 / 120.0)
+	assert_eq(ball._pending_linear, Vector3.ZERO,
+		"Catch must zero ball velocity")
+	assert_not_null(ball._pending_teleport,
+		"Catch must teleport ball to GK chest")
+	var tp: Vector3 = ball._pending_teleport as Vector3
+	assert_almost_eq(tp.x, gk_player.global_position.x, 0.001,
+		"Caught ball X must equal GK X")
+	assert_almost_eq(tp.y, gk.catch_hold_height_m, 0.001,
+		"Caught ball Y must equal catch_hold_height_m")
+	assert_eq(gk.get_last_decision(), &"catch",
+		"_last_decision should reflect the catch")
+
+
+func test_catch_skipped_when_ball_above_max_height() -> void:
+	gk_player.global_position = Vector3(0.0, 0.0, -51.0)
+	ball.global_position = Vector3(0.2, 3.0, -50.8)  ## above catch_max_height
+	ball.linear_velocity = Vector3(0.0, 0.0, 0.0)
+	ball._pending_linear = null
+	ball._pending_teleport = null
+	gk.step(1.0 / 120.0)
+	# State machine still ran (idle), but no catch.
+	assert_ne(gk.get_last_decision(), &"catch",
+		"Ball above catch_max_height_m must NOT be caught")
+
+
+func test_catch_skipped_when_ball_outside_radius() -> void:
+	gk_player.global_position = Vector3(0.0, 0.0, -51.0)
+	ball.global_position = Vector3(3.0, 0.4, -50.0)  ## > catch_radius (0.7)
+	ball.linear_velocity = Vector3.ZERO
+	ball._pending_linear = null
+	ball._pending_teleport = null
+	gk.step(1.0 / 120.0)
+	assert_ne(gk.get_last_decision(), &"catch",
+		"Ball outside catch_radius must NOT be caught")
+
+
 func test_player_state_marks_saving_during_save_or_snap() -> void:
 	gk_player.global_position = Vector3(0.0, 0.0, -51.0)
 	ball.global_position = Vector3(0.5, 0.4, -42.0)
