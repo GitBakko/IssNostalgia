@@ -130,6 +130,63 @@ func test_skips_human_team_players() -> void:
 
 # ---- 2 Hz tactical update rate (R05-F01) -------------------------------
 
+# ---- R05-F03 half-change event hybrid ----------------------------------
+
+func test_event_trigger_fires_on_ball_half_change() -> void:
+	# Establish baseline at -10 z (Team A half).
+	ball.global_position = Vector3(0.0, 0.11, -10.0)
+	ai._seconds_since_last_event = 999.0  ## past min interval
+	ai.step(0.01)  ## first call sets baseline, no event
+	for p in players_b:
+		if not p.is_goalkeeper:
+			assert_false(p._has_static_target,
+				"Baseline-only call must NOT trigger event")
+	# Now ball crosses to +10 z (Team B half).
+	ball.global_position = Vector3(0.0, 0.11, 10.0)
+	ai.step(0.01)  ## tiny delta, polling won't fire — event must
+	for p in players_b:
+		if p.is_goalkeeper:
+			continue
+		assert_true(p._has_static_target,
+			"Half-change event must force an immediate tick_targets")
+
+
+func test_event_trigger_respects_min_interval() -> void:
+	# Trigger one event, then immediately wobble back — second
+	# half-change must be blocked by min_seconds_between_events.
+	ball.global_position = Vector3(0.0, 0.11, -10.0)
+	ai._seconds_since_last_event = 999.0
+	ai.step(0.01)  ## baseline
+	ball.global_position = Vector3(0.0, 0.11, 10.0)
+	ai.step(0.01)  ## first event — fires
+	# Clear flags to detect a second tick.
+	for p in players_b:
+		if p != null:
+			p.clear_static_target()
+	# Cross back to -Z half within the min interval.
+	ball.global_position = Vector3(0.0, 0.11, -10.0)
+	ai.step(0.10)  ## only 0.10 s elapsed since last event
+	for p in players_b:
+		if p.is_goalkeeper:
+			continue
+		assert_false(p._has_static_target,
+			"Second half-change inside min interval must NOT trigger")
+
+
+func test_event_trigger_ignores_centre_line_wobble() -> void:
+	# |z| < half_change_min_abs_z (5.0) → no event tracking.
+	ball.global_position = Vector3(0.0, 0.11, -2.0)
+	ai._seconds_since_last_event = 999.0
+	ai.step(0.01)  ## inside buffer — no baseline set
+	ball.global_position = Vector3(0.0, 0.11, 2.0)
+	ai.step(0.01)  ## still inside buffer
+	for p in players_b:
+		if p.is_goalkeeper:
+			continue
+		assert_false(p._has_static_target,
+			"Wobble inside |z|<5 must NOT trigger event tick")
+
+
 func test_step_updates_at_2_hz_not_per_tick() -> void:
 	# 5 calls of 0.05 s = 0.25 s total → strictly less than 0.5 s
 	# (= 1 / update_hz at 2 Hz). NO target should be set yet.

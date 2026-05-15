@@ -94,6 +94,10 @@ var team_b_passer: PassingController
 var team_b_static_ai: StaticAI  ## non-null only when both_human == false
 var team_a_goalkeeper: Goalkeeper  ## defends -Z goal
 var team_b_goalkeeper: Goalkeeper  ## defends +Z goal
+var match_clock: MatchClock
+var scoreboard: Scoreboard
+var _last_goal_test_z: float = 0.0   ## edge-detect ball crossing goal line
+var _goal_lockout_remaining_s: float = 0.0  ## avoid double-count on bounce
 var players_a: Array[Player] = []
 var players_b: Array[Player] = []
 
@@ -114,6 +118,7 @@ func _ready() -> void:
 	_spawn_team_a()
 	_spawn_team_b()
 	_spawn_ball_controllers()
+	_spawn_match_state()
 	# Camera dev-tool state init.
 	_camera_pitch_deg = camera_pitch_default_deg
 	_camera_distance_m = camera_distance_default_m
@@ -142,7 +147,8 @@ func _spawn_team_a() -> void:
 	team_a_ctrl.ball_ref = ball
 	team_a_ctrl.is_human = true
 	team_a_root.add_child(team_a_ctrl)
-	team_a_goalkeeper = _spawn_goalkeeper(players_a, team_a_root, -52.5, "A")
+	team_a_goalkeeper = _spawn_goalkeeper(players_a, team_a_root, -52.5, "A",
+		Scoreboard.TEAM_A)
 
 
 func _spawn_team_b() -> void:
@@ -174,11 +180,13 @@ func _spawn_team_b() -> void:
 		team_b_static_ai.formation = formation
 		team_b_static_ai.mirror_anchors = true
 		team_b_root.add_child(team_b_static_ai)
-	team_b_goalkeeper = _spawn_goalkeeper(players_b, team_b_root, 52.5, "B")
+	team_b_goalkeeper = _spawn_goalkeeper(players_b, team_b_root, 52.5, "B",
+		Scoreboard.TEAM_B)
 
 
 func _spawn_goalkeeper(team_players: Array[Player], root: Node3D,
-		own_goal_z: float, label: String) -> Goalkeeper:
+		own_goal_z: float, label: String,
+		team_id: int = Scoreboard.TEAM_A) -> Goalkeeper:
 	# Find the GK (formation marks the role; conventionally last entry).
 	var gk_player: Player = null
 	for p in team_players:
@@ -192,6 +200,7 @@ func _spawn_goalkeeper(team_players: Array[Player], root: Node3D,
 	gk.goalkeeper = gk_player
 	gk.ball = ball
 	gk.goal_z = own_goal_z
+	gk.my_team_id = team_id
 	root.add_child(gk)
 	return gk
 
@@ -256,6 +265,11 @@ func _instantiate_players(root: Node3D, team: TeamConfig, mirror_z: bool) -> Arr
 		p.team_config = team
 		p.role_index = i
 		p.is_goalkeeper = formation.is_goalkeeper_role(i)
+		# Sprint 9 T01 — copy per-player attributes from TeamConfig
+		# arrays so Player can be queried directly by BallController
+		# without round-tripping through TeamConfig at every kick.
+		p.close_control = team.get_close_control(i)
+		p.dribble_skill = team.get_dribble_skill(i)
 		p.name = "%s_%s" % [team.team_name.replace(" ", ""), formation.role_labels[i]]
 		root.add_child(p)
 		# Placement after add_child so global_position is well-defined.
@@ -270,8 +284,67 @@ func _process(delta: float) -> void:
 	_update_hud()
 	_handle_debug_ball_input()
 	_update_camera(delta)
+	_check_goal_lines(delta)
 	if Input.is_action_just_pressed(&"ui_cancel"):
 		get_tree().quit()
+
+
+# ---- Match state spawn + goal detection (S09-T03) -----------------------
+
+func _spawn_match_state() -> void:
+	scoreboard = Scoreboard.new()
+	scoreboard.name = "Scoreboard"
+	add_child(scoreboard)
+	match_clock = MatchClock.new()
+	match_clock.name = "MatchClock"
+	add_child(match_clock)
+	# Wire HUD-side responses (HUD label updates done in _update_hud).
+	scoreboard.score_changed.connect(_on_score_changed)
+	match_clock.match_ended.connect(_on_match_ended)
+	# T04 — inject scoreboard + clock into goalkeepers so the
+	# catch-up boost can read live state.
+	if team_a_goalkeeper != null:
+		team_a_goalkeeper.scoreboard = scoreboard
+		team_a_goalkeeper.match_clock = match_clock
+	if team_b_goalkeeper != null:
+		team_b_goalkeeper.scoreboard = scoreboard
+		team_b_goalkeeper.match_clock = match_clock
+	if ball != null:
+		_last_goal_test_z = ball.global_position.z
+
+
+## Edge-detected goal-line crossing. Scores when ball Z transitions
+## past ±52.5. Lockout 0.5 s prevents double-counts on a bouncing
+## ball that re-crosses the line during goal-area chaos.
+func _check_goal_lines(delta: float) -> void:
+	if scoreboard == null or ball == null:
+		return
+	if _goal_lockout_remaining_s > 0.0:
+		_goal_lockout_remaining_s = maxf(0.0,
+			_goal_lockout_remaining_s - delta)
+	var z_now: float = ball.global_position.z
+	# Team B's goal at +Z = 52.5 → Team A scored.
+	if _last_goal_test_z < 52.5 and z_now >= 52.5 \
+			and _goal_lockout_remaining_s <= 0.0:
+		scoreboard.register_goal(Scoreboard.TEAM_A)
+		_goal_lockout_remaining_s = 0.5
+	# Team A's goal at -Z = -52.5 → Team B scored.
+	elif _last_goal_test_z > -52.5 and z_now <= -52.5 \
+			and _goal_lockout_remaining_s <= 0.0:
+		scoreboard.register_goal(Scoreboard.TEAM_B)
+		_goal_lockout_remaining_s = 0.5
+	_last_goal_test_z = z_now
+
+
+func _on_score_changed(_a: int, _b: int) -> void:
+	# HUD pull happens in `_update_hud`; this hook is reserved for
+	# Sprint 10 celebration sequences.
+	pass
+
+
+func _on_match_ended() -> void:
+	if ball_controller != null and ball_controller.is_carried():
+		ball_controller.request_release(Vector3.ZERO)
 
 
 # ---- Camera follow (R06-F01/F04/F06) -------------------------------------
@@ -398,6 +471,21 @@ func _handle_debug_ball_input() -> void:
 		move_ball_relative(0.0, debug_ball_step_m)
 	if Input.is_action_just_pressed(&"debug_ball_random"):
 		randomize_ball_position()
+	if Input.is_action_just_pressed(&"debug_ball_reset"):
+		reset_ball_to_centre()
+
+
+## Reset the ball to centre with zero velocity, clear all carrier
+## state. Useful between save scenarios in playtest. Goes through
+## BallController so possession / collision exception unwind cleanly.
+func reset_ball_to_centre() -> void:
+	if ball == null:
+		return
+	if ball_controller != null and ball_controller.is_carried():
+		ball_controller.request_release(Vector3.ZERO)
+	ball.clear_possession()
+	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
+	ball.teleport_to(Vector3(0.0, 0.11, 0.0))
 
 
 ## Nudge the ball by (dx, dz) metres on the ground plane. Public so tests
@@ -444,20 +532,43 @@ func _update_hud() -> void:
 		Engine.get_frames_per_second(),
 		Engine.physics_ticks_per_second,
 	]
+	var match_line: String = ""
+	if scoreboard != null and match_clock != null:
+		var t: float = match_clock.current_time_remaining_s
+		var mm: int = int(t / 60.0)
+		var ss: int = int(t) % 60
+		match_line = "SCORE  %s %d - %d %s    %02d:%02d" % [
+			team_a_config.team_name, scoreboard.team_a_goals,
+			scoreboard.team_b_goals, team_b_config.team_name,
+			mm, ss,
+		]
+	# T06 — GK decision diagnostic line. Shows the decision branch
+	# of both keepers so playtest can correlate ball trajectory vs
+	# AI choice without flipping debug_log on each GK.
+	var gk_line: String = ""
+	if team_a_goalkeeper != null and team_b_goalkeeper != null:
+		gk_line = "GK A:%s   GK B:%s" % [
+			team_a_goalkeeper.get_last_decision(),
+			team_b_goalkeeper.get_last_decision(),
+		]
 	if both_human and team_b_player_ctrl != null:
 		var b_active: Player = team_b_player_ctrl.player
 		var b_role: String = ""
 		if b_active != null and b_active.role_index < formation.role_labels.size():
 			b_role = formation.role_labels[b_active.role_index]
-		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s\n%s" % [
+		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s\n%s\n%s\n%s" % [
 			line_a, team_b_config.team_name,
 			b_role,
 			b_active.stamina if b_active else 0.0,
 			ball_line,
 			fps_line,
+			match_line,
+			gk_line,
 		]
 	else:
-		hud_active_label.text = "%s\n%s\n%s" % [line_a, ball_line, fps_line]
+		hud_active_label.text = "%s\n%s\n%s\n%s\n%s" % [
+			line_a, ball_line, fps_line, match_line, gk_line,
+		]
 
 
 # ---- Diagnostics ---------------------------------------------------------

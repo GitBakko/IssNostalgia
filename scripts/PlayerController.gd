@@ -145,6 +145,10 @@ func _physics_process(delta: float) -> void:
 	# Input poll
 	var input_dir: Vector3 = _read_movement_input()
 	var sprint_held: bool = Input.is_action_pressed(_full(&"sprint"))
+	# Sprint 9 T02 — close-control modal. Polled here (not in
+	# step_movement) because it's a per-frame flag, not a tick
+	# input that affects velocity directly.
+	player.has_tight_control = Input.is_action_pressed(_full(&"tight_control"))
 	step_movement(input_dir, sprint_held, delta)
 	# Press capture for buffered actions (movement keys are stateful, not
 	# buffered; only discrete actions need buffering).

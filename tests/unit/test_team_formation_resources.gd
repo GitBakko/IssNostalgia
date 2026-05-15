@@ -71,3 +71,35 @@ func test_both_teams_share_formation_id() -> void:
 	var tb: TeamConfig = load("res://resources/teams/team_b.tres") as TeamConfig
 	assert_eq(ta.formation_id, tb.formation_id,
 		"Phase 2 both teams use same formation 2-1-1")
+
+
+# ---- S09-T01 per-player attribute accessors ---------------------------
+
+func test_close_control_accessor_in_range() -> void:
+	var tc: TeamConfig = TeamConfig.new()
+	tc.close_control = [0.20, 0.40, 0.60, 0.80, 0.10]
+	assert_almost_eq(tc.get_close_control(0), 0.20, 0.001)
+	assert_almost_eq(tc.get_close_control(2), 0.60, 0.001)
+	assert_almost_eq(tc.get_close_control(4), 0.10, 0.001)
+
+
+func test_close_control_accessor_falls_back_when_out_of_range() -> void:
+	var tc: TeamConfig = TeamConfig.new()
+	tc.close_control = [0.7]  ## only 1 entry
+	tc.default_close_control = 0.33
+	assert_almost_eq(tc.get_close_control(0), 0.7, 0.001,
+		"In-range index returns the array value")
+	assert_almost_eq(tc.get_close_control(3), 0.33, 0.001,
+		"Out-of-range index falls back to default_close_control")
+	assert_almost_eq(tc.get_close_control(-1), 0.33, 0.001,
+		"Negative index also falls back to default")
+
+
+func test_dribble_skill_accessor_in_range_and_fallback() -> void:
+	var tc: TeamConfig = TeamConfig.new()
+	tc.dribble_skill = [0.9, 0.1]
+	tc.default_dribble_skill = 0.5
+	assert_almost_eq(tc.get_dribble_skill(0), 0.9, 0.001)
+	assert_almost_eq(tc.get_dribble_skill(1), 0.1, 0.001)
+	assert_almost_eq(tc.get_dribble_skill(4), 0.5, 0.001,
+		"Out-of-range falls back to default_dribble_skill")

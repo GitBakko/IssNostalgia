@@ -546,6 +546,105 @@ func test_pickup_resumes_after_lockout_expires() -> void:
 		"After lockout drains, normal pickup resumes")
 
 
+# ---- S09-T02 BallController consumes per-carrier carry offset + loss --
+
+func test_loss_threshold_uses_carrier_extension_when_tight_control() -> void:
+	# At a distance just over the GLOBAL loss_threshold (3.0) but
+	# inside the tight-control extension (3.75), the ball should
+	# NOT count as lost — Player API extends the leash.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.has_tight_control = true
+	p.close_control = 0.0
+	bc._assign_carrier(p)
+	# Ball at 3.30 m — over 3.0 base, under 3.75 extended.
+	ball.global_position = Vector3(0.0, 0.11, -3.30)
+	bc._check_loss()
+	assert_eq(bc.get_carrier(), p,
+		"Tight-control carrier keeps possession at 3.30 m (extended threshold 3.75)")
+
+
+func test_loss_fires_past_extended_threshold() -> void:
+	# Same setup but ball drifts past the extension — loss fires.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.has_tight_control = true
+	p.close_control = 0.0
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -4.0)  ## > 3.75 extended
+	bc._check_loss()
+	assert_null(bc.get_carrier(),
+		"Past the extended threshold, possession is still lost")
+
+
+func test_carry_offset_helper_falls_back_when_carrier_missing_api() -> void:
+	# A carrier-shaped Node that does NOT expose the API must get
+	# the global `turn_glue_offset_m` back unchanged.
+	bc._carrier = null
+	assert_almost_eq(bc._carry_offset_for_carrier(5.0), bc.turn_glue_offset_m, 0.001,
+		"No carrier → return global turn_glue_offset_m")
+
+
+# ---- S09-T01 per-player dribble_skill drives kick factor ---------------
+
+func test_kick_factor_uses_high_skill_envelope_for_elite_dribbler() -> void:
+	# dribble_skill = 1.0 → kick_factor = walk_high_skill (= 1.04 default)
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	p.dribble_skill = 1.0
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)  ## avoid turn-glue
+	ball._pending_linear = null
+	bc._apply_proximity_kick(p.velocity)
+	assert_not_null(ball._pending_linear)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	var planar_speed: float = sqrt(pending.x * pending.x + pending.z * pending.z)
+	var expected: float = p.max_walk_speed * bc.kick_factor_walk_high_skill
+	assert_almost_eq(planar_speed, expected, 0.05,
+		"Elite dribbler (skill=1.0) uses walk_high_skill factor")
+
+
+func test_kick_factor_uses_low_skill_envelope_for_physical_striker() -> void:
+	# dribble_skill = 0.0 → kick_factor = walk_low_skill (= 1.12 default)
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	p.dribble_skill = 0.0
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
+	ball._pending_linear = null
+	bc._apply_proximity_kick(p.velocity)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	var planar_speed: float = sqrt(pending.x * pending.x + pending.z * pending.z)
+	var expected: float = p.max_walk_speed * bc.kick_factor_walk_low_skill
+	assert_almost_eq(planar_speed, expected, 0.05,
+		"Low-skill carrier (skill=0.0) uses walk_low_skill factor")
+
+
+func test_kick_factor_midpoint_skill_matches_legacy_constant() -> void:
+	# skill = 0.5 → midpoint between high (1.04) and low (1.12) = 1.08
+	# = legacy `kick_factor_walk` constant. Backward compat.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.velocity = Vector3(0.0, 0.0, -p.max_walk_speed)
+	p.dribble_skill = 0.5
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -0.1)
+	bc._last_carry_dir = Vector3(0.0, 0.0, -1.0)
+	ball._pending_linear = null
+	bc._apply_proximity_kick(p.velocity)
+	var pending: Vector3 = ball._pending_linear as Vector3
+	var planar_speed: float = sqrt(pending.x * pending.x + pending.z * pending.z)
+	var midpoint: float = (bc.kick_factor_walk_high_skill
+		+ bc.kick_factor_walk_low_skill) * 0.5
+	var expected: float = p.max_walk_speed * midpoint
+	assert_almost_eq(planar_speed, expected, 0.05,
+		"Midpoint skill (0.5) = (high+low)/2 — matches Sprint 8 default")
+
+
 # ---- Buffered turn → pivot kick (Bug 1, playtest 2026-05-14) -----------
 
 func test_buffered_turn_kick_uses_intent_and_snaps_velocity() -> void:

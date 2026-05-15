@@ -204,3 +204,75 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | 2026-05-15 | T05-fix1 | GK catch resolution — ball was phasing through GK because BallPhysics custom_integrator skips dynamic-body contacts. Explicit Goalkeeper._try_catch() snaps ball to chest within catch_radius_m. |
 | 2026-05-15 | T06 | NBA Jam catch-up boost SCHEMA on Goalkeeper. 5 @export params + 2 hooks (`get_effective_reaction_buffer_s`, `is_catchup_eligible` stub). Runtime activation Sprint 9 (requires scoreboard). |
 | 2026-05-15 | T07 | 196/196 PASS, 5.81 s headless. Target ≥145 met +51. Mobile FPS perf pass deferred Sprint 10. |
+
+
+---
+
+## Sprint 09 — Discuss Phase (decisioni accettate, 2026-05-15)
+
+- **Per-player attributes infrastructure** (T01) — `TeamConfig.tres`
+  acquires per-player rows for `close_control` ∈ [0,1] and
+  `dribble_skill` ∈ [0,1]. `Player.gd` exposes the same as `@export`,
+  populated from config in `GameMatch._instantiate_players`.
+- **Close-control modal** (T02) — new `*_tight_control` input action
+  (key `Z` for P1, numpad chosen at impl time for P2). When held,
+  `Player.tight_control_held = true`. `BallController` reads the
+  carrier's effective carry offset / loss threshold via Player API,
+  no more global constants for these knobs.
+- **Match clock + scoreboard** (T03) — `MatchClock` 4-min default,
+  `Scoreboard` simple `int + int + signal`. Goal detection: ball.z
+  past ±52.5 with no GK catch in last 0.5 s. Pause/resume reserved
+  for Sprint 10 celebrations.
+- **Catch-up runtime** (T04) — `Goalkeeper.is_catchup_eligible` reads
+  real `Scoreboard` + `MatchClock`, no longer a `false` stub. Trigger:
+  trailing by ≥ `trailing_goal_threshold` AND `time_remaining ≤
+  time_remaining_threshold_s`. Schema params unchanged from S08.
+- **StaticAI half-change hybrid** (T05) — augments the 2 Hz polling
+  with an event trigger on `signf(ball.z)` change, debounced by
+  `min_seconds_since_event_trigger = 1.5` and gated by `|ball.z| > 5`
+  to ignore wobbles around the centre line.
+- **Camera polish (R06-F03/F07) + aftertouch (R09-F07)** — DEFERRED
+  to Sprint 10 bundle. Touch-input pass (R07) likely runs alongside
+  there; pairing makes more sense than scattering polish across S9.
+- **R04-F03 controlled-hesitation reaction delay** stays Phase 3.
+- **R05-F07 Temporal Voronoi** stays Phase 3.
+
+### Sprint 09 — Findings → Code Mapping (popolato a fine sprint, T08)
+
+| Finding | File:func / commit | Status |
+|---------|--------------------|--------|
+| R02-F04 attribute-driven extension | `BallController._apply_proximity_kick` lerp by `Player.dribble_skill` (high 1.04 / low 1.12 walk; high 1.10 / low 1.26 sprint; midpoint 0.5 = legacy 1.08/1.18) | APPLIED T01 |
+| R02-F07 close-control modal + tight control | `Player.get_effective_carry_offset` + `get_effective_loss_threshold` (opt-in: closeness=0 at default 0.5 + no modal); `BallController._carry_offset_for_carrier` consumes via API | APPLIED T01+T02 |
+| R05-F03 half-change event hybrid | `StaticAI._check_half_change_event` (signf(ball.z) flip + min_seconds_between_events=1.5 + half_change_min_abs_z=5.0); `step()` resets polling timer on event | APPLIED T05 |
+| R09-F02 catch-up runtime activation | `Goalkeeper.is_catchup_eligible` reads `scoreboard.goal_gap_from(my_team_id) ≥ trailing_goal_threshold` AND `match_clock.current_time_remaining_s ≤ time_remaining_threshold_s`; NULL-safe; +12.5 % accuracy boost deferred S10 (no shot-spread concept yet) | APPLIED T04 |
+| Match infrastructure (in-house) | `MatchClock` + `Scoreboard` (goal_gap_from accessor); `GameMatch._spawn_match_state` + `_check_goal_lines` edge-detect ball.z past ±52.5 with 0.5 s lockout | APPLIED T03 |
+| Sandbox dev-tool polish | `R` ball reset-to-centre + GK `_last_decision` HUD line; MMB camera reset verified from S08 | APPLIED T06 |
+
+### Sprint 09 — T07 Regression + Perf Check
+
+- **GUT**: 235/235 PASS (6.52 s headless). Target ≥ 215. Headroom +20.
+- **New tests this sprint**:
+  - test_player_movement.gd — +5 attribute / API tests (T01 + T02)
+  - test_team_formation_resources.gd — +3 TeamConfig accessor tests (T01)
+  - test_ball_controller_possession.gd — +6 kick-factor + carrier-API tests (T01 + T02)
+  - test_goalkeeper.gd — +5 catch-up runtime tests (T04, replaces 2 schema stubs)
+  - test_match_clock.gd — 6 new (T03)
+  - test_scoreboard.gd — 6 new (T03)
+  - test_static_ai.gd — +3 half-change event tests (T05)
+- **Perf**: no regression observed in headless run. Mobile FPS pass
+  still deferred Sprint 10 (per S08 T07 note).
+- **Regression**: zero tests removed. Goalkeeper catch-up schema
+  stubs (S08 T06) replaced by 5 runtime tests; underlying schema
+  contract preserved.
+
+### Sprint 09 — Calibration Sessions
+
+| Date       | Task   | Notes |
+|------------|--------|-------|
+| 2026-05-15 | T01 | Per-player attributes schema. TeamConfig parallel arrays + Player @export. BallController kick-factor lerp by `dribble_skill`; midpoint 0.5 = legacy Sprint 8 constants for backward compat. |
+| 2026-05-15 | T02 | Tight-control modal (Z key P1 / Num0 P2). Player API `get_effective_carry_offset` + `get_effective_loss_threshold` opt-in: closeness=0 at default attrs → returns base unchanged. BallController helpers consume via Player API. Lesson from playtest test bumps: gate skill modulation by "above midpoint OR explicit modal" so default 0.5 preserves established tests. |
+| 2026-05-15 | T03 | MatchClock + Scoreboard infrastructure. 4-min default countdown, 0.5 s goal-line lockout, edge-detect ball.z past ±52.5. HUD line shows `SCORE A 0-0 B   04:00`. |
+| 2026-05-15 | T04 | R09-F02 catch-up runtime activation. `catchup_boost_enabled` default flipped false→true; eligibility wired to `scoreboard.goal_gap_from(my_team_id) ≥ 2 AND match_clock.current_time_remaining_s ≤ 60`. Accuracy boost deferred S10. |
+| 2026-05-15 | T05 | StaticAI half-change event hybrid (R05-F03). signf(ball.z) flip + 1.5 s min interval + |z|>5 wobble buffer. Polling 2 Hz unchanged. |
+| 2026-05-15 | T06 | Sandbox polish — `R` ball reset-centre, GK debug HUD line. MMB camera reset already wired S08. |
+| 2026-05-15 | T07 | 235/235 PASS, 6.52 s headless. Target ≥215 met +20. |

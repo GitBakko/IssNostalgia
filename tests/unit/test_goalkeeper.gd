@@ -346,23 +346,90 @@ func test_debug_return_kicks_ball_back_to_last_shooter() -> void:
 
 # ---- T06 NBA Jam catch-up boost (R09-F02 — schema only) ----------------
 
-func test_catchup_boost_disabled_by_default() -> void:
-	# Default ctor → catchup_boost_enabled = false. Effective reaction
-	# buffer must equal the raw reaction_buffer_s.
-	assert_false(gk.catchup_boost_enabled,
-		"catchup_boost_enabled must default to false in Sprint 8")
+func test_catchup_boost_default_enabled_after_t04() -> void:
+	# Sprint 9 T04 — runtime wired, boost enabled by default.
+	# Without scoreboard / clock injection, eligibility still false
+	# (NULL-safe), so effective buffer = raw buffer.
+	assert_true(gk.catchup_boost_enabled,
+		"catchup_boost_enabled defaults to true after T04 runtime wiring")
 	assert_eq(gk.get_effective_reaction_buffer_s(), gk.reaction_buffer_s,
-		"With boost disabled, effective buffer = raw buffer")
+		"Without scoreboard/clock, eligibility false → raw buffer")
 
 
-func test_catchup_eligibility_returns_false_without_scoreboard() -> void:
-	# Sprint 8 stub — eligibility always false (no scoreboard yet).
-	# Even when catchup_boost_enabled is on, the boost stays inert.
-	gk.catchup_boost_enabled = true
+func test_catchup_inactive_when_score_gap_below_threshold() -> void:
+	var sb: Scoreboard = Scoreboard.new()
+	add_child(sb)
+	var mc: MatchClock = MatchClock.new()
+	mc.match_duration_s = 60.0
+	mc.auto_start = false
+	add_child(mc)
+	gk.scoreboard = sb
+	gk.match_clock = mc
+	gk.my_team_id = Scoreboard.TEAM_A
+	# Tied → gap = 0 < threshold (2) → not eligible.
+	mc.current_time_remaining_s = 30.0  ## inside final-window
 	assert_false(gk.is_catchup_eligible(),
-		"Sprint 8 eligibility stub must always return false")
-	assert_eq(gk.get_effective_reaction_buffer_s(), gk.reaction_buffer_s,
-		"Effective buffer unchanged while eligibility returns false")
+		"Tied score must NOT trigger catch-up")
+	sb.queue_free()
+	mc.queue_free()
+
+
+func test_catchup_inactive_when_time_above_threshold() -> void:
+	var sb: Scoreboard = Scoreboard.new()
+	add_child(sb)
+	var mc: MatchClock = MatchClock.new()
+	mc.auto_start = false
+	add_child(mc)
+	gk.scoreboard = sb
+	gk.match_clock = mc
+	gk.my_team_id = Scoreboard.TEAM_A
+	# Trailing by 3 but match still has 120 s → not eligible
+	# (time_remaining_threshold_s default = 60.0).
+	sb.register_goal(Scoreboard.TEAM_B)
+	sb.register_goal(Scoreboard.TEAM_B)
+	sb.register_goal(Scoreboard.TEAM_B)
+	mc.current_time_remaining_s = 120.0
+	assert_false(gk.is_catchup_eligible(),
+		"Trailing but outside final window → not eligible")
+	sb.queue_free()
+	mc.queue_free()
+
+
+func test_catchup_active_when_trailing_in_final_window() -> void:
+	var sb: Scoreboard = Scoreboard.new()
+	add_child(sb)
+	var mc: MatchClock = MatchClock.new()
+	mc.auto_start = false
+	add_child(mc)
+	gk.scoreboard = sb
+	gk.match_clock = mc
+	gk.my_team_id = Scoreboard.TEAM_A
+	sb.register_goal(Scoreboard.TEAM_B)
+	sb.register_goal(Scoreboard.TEAM_B)  ## A trailing by 2
+	mc.current_time_remaining_s = 30.0   ## inside 60 s window
+	assert_true(gk.is_catchup_eligible(),
+		"Trailing by ≥2 in final window must trigger catch-up")
+	sb.queue_free()
+	mc.queue_free()
+
+
+func test_get_effective_reaction_buffer_uses_factor_when_eligible() -> void:
+	var sb: Scoreboard = Scoreboard.new()
+	add_child(sb)
+	var mc: MatchClock = MatchClock.new()
+	mc.auto_start = false
+	add_child(mc)
+	gk.scoreboard = sb
+	gk.match_clock = mc
+	gk.my_team_id = Scoreboard.TEAM_A
+	sb.register_goal(Scoreboard.TEAM_B)
+	sb.register_goal(Scoreboard.TEAM_B)
+	mc.current_time_remaining_s = 30.0
+	var expected: float = gk.reaction_buffer_s * gk.catchup_gk_reaction_factor
+	assert_almost_eq(gk.get_effective_reaction_buffer_s(), expected, 0.001,
+		"Eligible state must scale buffer by catchup_gk_reaction_factor")
+	sb.queue_free()
+	mc.queue_free()
 
 
 func test_player_state_marks_saving_during_save_or_snap() -> void:

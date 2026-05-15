@@ -69,6 +69,20 @@ const DIRECTION_BUFFER_MAX_S: float = 0.8
 @export var role_index: int = 0
 @export var is_goalkeeper: bool = false
 
+@export_group("Attributes (S09-T01 per-player)")
+## R02-F07 — high value = ball held tighter at low speed
+## (smaller carry offset + higher loss threshold). T02 wires this
+## into `BallController` via Player.get_effective_carry_offset.
+@export_range(0.0, 1.0, 0.05) var close_control: float = 0.5
+## R02-F04 — high value = closer touches (smaller kick factor).
+## `BallController._apply_proximity_kick` lerps walk/sprint factor
+## between high-skill and low-skill envelopes by this attribute.
+@export_range(0.0, 1.0, 0.05) var dribble_skill: float = 0.5
+## Held by `PlayerController` when the carrier wants the close-
+## control modal active (T02). Independent from `close_control`
+## (the attribute) — both compose into the effective threshold.
+var has_tight_control: bool = false
+
 @export_group("Movement")
 @export var max_walk_speed: float = 5.5      ## m/s, walking baseline
 @export var max_sprint_speed: float = 8.0    ## m/s, sprint with stamina > 0
@@ -324,6 +338,43 @@ func is_stop_intent_active() -> bool:
 	if not _intent_explicitly_set:
 		return false
 	return _intended_input_dir.length_squared() < 1.0e-4
+
+
+## R02-F07 — effective carry offset for the ball during the
+## turn-glue snap. Modulates `base` toward `min_offset` based on
+## the carrier's "closeness" (tight-control modal + close_control
+## attribute ABOVE midpoint). At default `close_control = 0.5`
+## with no modal, returns `base` unchanged so Sprint 8 behaviour
+## is preserved. Closeness only kicks in for elite close-control
+## players or when the player explicitly holds the modal key.
+func get_effective_carry_offset(planar_speed: float, base: float) -> float:
+	var modal_boost: float = 0.5 if has_tight_control else 0.0
+	# Attribute contribution: only the half above midpoint counts.
+	var attr_boost: float = maxf(0.0, close_control - 0.5) * 2.0
+	var closeness: float = clampf(modal_boost + attr_boost, 0.0, 1.0)
+	if closeness < 0.001:
+		return base  ## legacy carrier — ride the constant
+	var min_offset: float = 0.30
+	var speed_factor: float = clampf(planar_speed / max_walk_speed,
+		0.0, 1.0)
+	# At high speed and low closeness, ride the base. At low speed
+	# and high closeness, shrink toward min. Closeness halves the
+	# speed factor's pull toward base.
+	var f: float = clampf(speed_factor * (1.0 - closeness * 0.5),
+		0.0, 1.0)
+	return lerpf(min_offset, base, f)
+
+
+## R02-F07 — effective loss threshold extension. Tight-control
+## modal (+25 % of base) + close_control attribute ABOVE midpoint
+## (up to +15 %). At default `close_control = 0.5` with no modal,
+## returns `base` unchanged so Sprint 8 behaviour is preserved.
+func get_effective_loss_threshold(base: float) -> float:
+	var bonus: float = 0.0
+	if has_tight_control:
+		bonus += 0.25 * base
+	bonus += 0.15 * base * maxf(0.0, close_control - 0.5) * 2.0
+	return base + bonus
 
 
 ## Arm a pickup input-lock window. While the lock drains, direction
