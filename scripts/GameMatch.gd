@@ -94,6 +94,10 @@ var team_b_passer: PassingController
 var team_b_static_ai: StaticAI  ## non-null only when both_human == false
 var team_a_goalkeeper: Goalkeeper  ## defends -Z goal
 var team_b_goalkeeper: Goalkeeper  ## defends +Z goal
+var match_clock: MatchClock
+var scoreboard: Scoreboard
+var _last_goal_test_z: float = 0.0   ## edge-detect ball crossing goal line
+var _goal_lockout_remaining_s: float = 0.0  ## avoid double-count on bounce
 var players_a: Array[Player] = []
 var players_b: Array[Player] = []
 
@@ -114,6 +118,7 @@ func _ready() -> void:
 	_spawn_team_a()
 	_spawn_team_b()
 	_spawn_ball_controllers()
+	_spawn_match_state()
 	# Camera dev-tool state init.
 	_camera_pitch_deg = camera_pitch_default_deg
 	_camera_distance_m = camera_distance_default_m
@@ -275,8 +280,59 @@ func _process(delta: float) -> void:
 	_update_hud()
 	_handle_debug_ball_input()
 	_update_camera(delta)
+	_check_goal_lines(delta)
 	if Input.is_action_just_pressed(&"ui_cancel"):
 		get_tree().quit()
+
+
+# ---- Match state spawn + goal detection (S09-T03) -----------------------
+
+func _spawn_match_state() -> void:
+	scoreboard = Scoreboard.new()
+	scoreboard.name = "Scoreboard"
+	add_child(scoreboard)
+	match_clock = MatchClock.new()
+	match_clock.name = "MatchClock"
+	add_child(match_clock)
+	# Wire HUD-side responses (HUD label updates done in _update_hud).
+	scoreboard.score_changed.connect(_on_score_changed)
+	match_clock.match_ended.connect(_on_match_ended)
+	if ball != null:
+		_last_goal_test_z = ball.global_position.z
+
+
+## Edge-detected goal-line crossing. Scores when ball Z transitions
+## past ±52.5. Lockout 0.5 s prevents double-counts on a bouncing
+## ball that re-crosses the line during goal-area chaos.
+func _check_goal_lines(delta: float) -> void:
+	if scoreboard == null or ball == null:
+		return
+	if _goal_lockout_remaining_s > 0.0:
+		_goal_lockout_remaining_s = maxf(0.0,
+			_goal_lockout_remaining_s - delta)
+	var z_now: float = ball.global_position.z
+	# Team B's goal at +Z = 52.5 → Team A scored.
+	if _last_goal_test_z < 52.5 and z_now >= 52.5 \
+			and _goal_lockout_remaining_s <= 0.0:
+		scoreboard.register_goal(Scoreboard.TEAM_A)
+		_goal_lockout_remaining_s = 0.5
+	# Team A's goal at -Z = -52.5 → Team B scored.
+	elif _last_goal_test_z > -52.5 and z_now <= -52.5 \
+			and _goal_lockout_remaining_s <= 0.0:
+		scoreboard.register_goal(Scoreboard.TEAM_B)
+		_goal_lockout_remaining_s = 0.5
+	_last_goal_test_z = z_now
+
+
+func _on_score_changed(_a: int, _b: int) -> void:
+	# HUD pull happens in `_update_hud`; this hook is reserved for
+	# Sprint 10 celebration sequences.
+	pass
+
+
+func _on_match_ended() -> void:
+	if ball_controller != null and ball_controller.is_carried():
+		ball_controller.request_release(Vector3.ZERO)
 
 
 # ---- Camera follow (R06-F01/F04/F06) -------------------------------------
@@ -449,20 +505,33 @@ func _update_hud() -> void:
 		Engine.get_frames_per_second(),
 		Engine.physics_ticks_per_second,
 	]
+	var match_line: String = ""
+	if scoreboard != null and match_clock != null:
+		var t: float = match_clock.current_time_remaining_s
+		var mm: int = int(t / 60.0)
+		var ss: int = int(t) % 60
+		match_line = "SCORE  %s %d - %d %s    %02d:%02d" % [
+			team_a_config.team_name, scoreboard.team_a_goals,
+			scoreboard.team_b_goals, team_b_config.team_name,
+			mm, ss,
+		]
 	if both_human and team_b_player_ctrl != null:
 		var b_active: Player = team_b_player_ctrl.player
 		var b_role: String = ""
 		if b_active != null and b_active.role_index < formation.role_labels.size():
 			b_role = formation.role_labels[b_active.role_index]
-		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s\n%s" % [
+		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s\n%s\n%s" % [
 			line_a, team_b_config.team_name,
 			b_role,
 			b_active.stamina if b_active else 0.0,
 			ball_line,
 			fps_line,
+			match_line,
 		]
 	else:
-		hud_active_label.text = "%s\n%s\n%s" % [line_a, ball_line, fps_line]
+		hud_active_label.text = "%s\n%s\n%s\n%s" % [
+			line_a, ball_line, fps_line, match_line,
+		]
 
 
 # ---- Diagnostics ---------------------------------------------------------
