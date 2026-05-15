@@ -256,6 +256,11 @@ func _instantiate_players(root: Node3D, team: TeamConfig, mirror_z: bool) -> Arr
 		p.team_config = team
 		p.role_index = i
 		p.is_goalkeeper = formation.is_goalkeeper_role(i)
+		# Sprint 9 T01 — copy per-player attributes from TeamConfig
+		# arrays so Player can be queried directly by BallController
+		# without round-tripping through TeamConfig at every kick.
+		p.close_control = team.get_close_control(i)
+		p.dribble_skill = team.get_dribble_skill(i)
 		p.name = "%s_%s" % [team.team_name.replace(" ", ""), formation.role_labels[i]]
 		root.add_child(p)
 		# Placement after add_child so global_position is well-defined.

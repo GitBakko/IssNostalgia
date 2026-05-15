@@ -46,16 +46,21 @@ const PICKUP_MAX_BALL_SPEED_SQ: float = PICKUP_MAX_BALL_SPEED * PICKUP_MAX_BALL_
 ## reaches ball" — no periodic timer, the cycle length emerges from
 ## drag + carrier speed (real football: kick → coast → catch up → kick).
 @export var kick_proximity_m: float = 0.35
-## Boost factor on the carrier velocity at WALK speed. 1.08 = ball
-## leaves 8 % faster than carrier → ~0.5–0.7 m flight before drag
-## brings it back. Short hops, tight close-control feel. Tuned
-## 2026-05-14 per user playtest. Will become per-player attribute
-## (close_control / dribble_skill) in Sprint 9 — see R02-F07.
+## Boost factor on the carrier velocity at WALK speed.
+## Sprint 9 T01: per-player attribute lerp.
+##   `dribble_skill = 1.0` (elite) → `kick_factor_walk_high_skill`
+##   `dribble_skill = 0.0` (low)   → `kick_factor_walk_low_skill`
+##   `dribble_skill = 0.5` (default) → midpoint = legacy 1.08
+## Backed by R02-F04 (Dribbling attribute drives carry distance).
+@export var kick_factor_walk_high_skill: float = 1.04
+@export var kick_factor_walk_low_skill: float = 1.12
+## Same lerp at SPRINT speed (carrier_speed > max_walk_speed).
+@export var kick_factor_sprint_high_skill: float = 1.10
+@export var kick_factor_sprint_low_skill: float = 1.26
+## Legacy fallback values used when the carrier has no
+## `dribble_skill` field (defensive — every spawned Player exposes
+## it, but tests can build bare Players directly).
 @export var kick_factor_walk: float = 1.08
-## Boost factor at SPRINT speed (carrier_speed > max_walk_speed).
-## 1.18 → ~1.8–2.2 m flight, attackers cover ground but the ball
-## stays in the carry zone. Tuned 2026-05-14 per user playtest.
-## Per-player override planned for Sprint 9 (R02-F07 attributes).
 @export var kick_factor_sprint: float = 1.18
 ## Fix #2 (R09-F04 anim warp + R02-F03 blend): kick direction = blend
 ## of carrier visual_forward (rotates immediately on input) and
@@ -606,10 +611,18 @@ func _apply_proximity_kick(carrier_v: Vector3) -> void:
 		if kick_dir_raw.length_squared() > 0.001:
 			kick_dir = kick_dir_raw.normalized()
 
-	# Walk vs sprint factor (user tune 2026-05-14).
-	var factor: float = kick_factor_walk
-	if carrier_speed > _carrier.max_walk_speed:
-		factor = kick_factor_sprint
+	# Walk vs sprint factor — lerped by carrier `dribble_skill`
+	# attribute (S09-T01). Defensive: fall back to legacy constants
+	# if the carrier doesn't expose the attribute.
+	var sprinting: bool = carrier_speed > _carrier.max_walk_speed
+	var skill: float = 0.5
+	if "dribble_skill" in _carrier:
+		skill = clampf(_carrier.dribble_skill, 0.0, 1.0)
+	var f_high: float = kick_factor_sprint_high_skill if sprinting \
+		else kick_factor_walk_high_skill
+	var f_low: float = kick_factor_sprint_low_skill if sprinting \
+		else kick_factor_walk_low_skill
+	var factor: float = lerpf(f_low, f_high, skill)
 
 	# Fix #4 — dampen the factor on detected turn so the ball doesn't
 	# escape control during direction changes.

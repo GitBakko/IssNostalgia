@@ -232,3 +232,17 @@ func test_busy_state_freezes_committed_direction() -> void:
 	player.apply_movement_step(-FORWARD, false, SUB_DT)
 	assert_eq(player._committed_input_dir, FORWARD,
 		"During busy ball-action, committed direction frozen (Q8)")
+
+
+# ---- S09-T01 per-player attributes -------------------------------------
+
+func test_player_attributes_default_to_midpoint() -> void:
+	# A bare Player must expose neutral 0.5 attributes so legacy
+	# tests / scenes that don't populate TeamConfig still get
+	# midpoint-skill behaviour.
+	assert_eq(player.close_control, 0.5,
+		"Default close_control must be midpoint 0.5")
+	assert_eq(player.dribble_skill, 0.5,
+		"Default dribble_skill must be midpoint 0.5")
+	assert_false(player.has_tight_control,
+		"has_tight_control must default to false")

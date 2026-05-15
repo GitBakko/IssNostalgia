@@ -69,6 +69,20 @@ const DIRECTION_BUFFER_MAX_S: float = 0.8
 @export var role_index: int = 0
 @export var is_goalkeeper: bool = false
 
+@export_group("Attributes (S09-T01 per-player)")
+## R02-F07 — high value = ball held tighter at low speed
+## (smaller carry offset + higher loss threshold). T02 wires this
+## into `BallController` via Player.get_effective_carry_offset.
+@export_range(0.0, 1.0, 0.05) var close_control: float = 0.5
+## R02-F04 — high value = closer touches (smaller kick factor).
+## `BallController._apply_proximity_kick` lerps walk/sprint factor
+## between high-skill and low-skill envelopes by this attribute.
+@export_range(0.0, 1.0, 0.05) var dribble_skill: float = 0.5
+## Held by `PlayerController` when the carrier wants the close-
+## control modal active (T02). Independent from `close_control`
+## (the attribute) — both compose into the effective threshold.
+var has_tight_control: bool = false
+
 @export_group("Movement")
 @export var max_walk_speed: float = 5.5      ## m/s, walking baseline
 @export var max_sprint_speed: float = 8.0    ## m/s, sprint with stamina > 0
