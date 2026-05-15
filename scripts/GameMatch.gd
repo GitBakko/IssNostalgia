@@ -471,6 +471,21 @@ func _handle_debug_ball_input() -> void:
 		move_ball_relative(0.0, debug_ball_step_m)
 	if Input.is_action_just_pressed(&"debug_ball_random"):
 		randomize_ball_position()
+	if Input.is_action_just_pressed(&"debug_ball_reset"):
+		reset_ball_to_centre()
+
+
+## Reset the ball to centre with zero velocity, clear all carrier
+## state. Useful between save scenarios in playtest. Goes through
+## BallController so possession / collision exception unwind cleanly.
+func reset_ball_to_centre() -> void:
+	if ball == null:
+		return
+	if ball_controller != null and ball_controller.is_carried():
+		ball_controller.request_release(Vector3.ZERO)
+	ball.clear_possession()
+	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
+	ball.teleport_to(Vector3(0.0, 0.11, 0.0))
 
 
 ## Nudge the ball by (dx, dz) metres on the ground plane. Public so tests
@@ -527,22 +542,32 @@ func _update_hud() -> void:
 			scoreboard.team_b_goals, team_b_config.team_name,
 			mm, ss,
 		]
+	# T06 — GK decision diagnostic line. Shows the decision branch
+	# of both keepers so playtest can correlate ball trajectory vs
+	# AI choice without flipping debug_log on each GK.
+	var gk_line: String = ""
+	if team_a_goalkeeper != null and team_b_goalkeeper != null:
+		gk_line = "GK A:%s   GK B:%s" % [
+			team_a_goalkeeper.get_last_decision(),
+			team_b_goalkeeper.get_last_decision(),
+		]
 	if both_human and team_b_player_ctrl != null:
 		var b_active: Player = team_b_player_ctrl.player
 		var b_role: String = ""
 		if b_active != null and b_active.role_index < formation.role_labels.size():
 			b_role = formation.role_labels[b_active.role_index]
-		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s\n%s\n%s" % [
+		hud_active_label.text = "%s\nP2 %s — %s   stamina: %.2f\n%s\n%s\n%s\n%s" % [
 			line_a, team_b_config.team_name,
 			b_role,
 			b_active.stamina if b_active else 0.0,
 			ball_line,
 			fps_line,
 			match_line,
+			gk_line,
 		]
 	else:
-		hud_active_label.text = "%s\n%s\n%s\n%s" % [
-			line_a, ball_line, fps_line, match_line,
+		hud_active_label.text = "%s\n%s\n%s\n%s\n%s" % [
+			line_a, ball_line, fps_line, match_line, gk_line,
 		]
 
 

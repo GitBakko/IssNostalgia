@@ -112,6 +112,6 @@ theme_override_constants/outline_size = 3
 theme_override_font_sizes/font_size = 14
 text = "P1: Arrows move   Shift sprint   Q switch   Space charge   E pass   L+Space lob   Z tight
 P2 (both_human=true): WASD move   RShift sprint   NumEnter switch   Num+ charge   Num- pass   Num. lob   Num0 tight
-debug ball: [ X-   ] X+   ; Z-   ' Z+   B random
+debug ball: [ X-   ] X+   ; Z-   ' Z+   B random   R reset-centre
 camera: Mouse-Wheel zoom   RMB-drag orbit   MMB reset
 ESC quit"
