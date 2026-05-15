@@ -122,7 +122,12 @@ func step(delta: float) -> void:
 		return
 	var ball_pos: Vector3 = ball.global_position
 	var ball_v: Vector3 = ball.linear_velocity
-	var save_data: Dictionary = compute_save_decision(ball_pos, ball_v)
+	# Runtime: drag-aware prediction (kinematic over-predicts on
+	# diagonals — playtest 2026-05-15). Falls back to kinematic when
+	# `ball.predict_forward` is unavailable. Tests can still call
+	# `compute_save_decision` directly for the deterministic
+	# kinematic path.
+	var save_data: Dictionary = _predict_intercept_drag_aware(ball_pos, ball_v)
 	_last_decision = save_data.get("decision", &"idle")
 	match _last_decision:
 		&"snap":
@@ -145,50 +150,99 @@ func step(delta: float) -> void:
 ##   intercept_x: float (NaN when not applicable)
 ##   predicted_height: float
 ## Public so tests can assert the decision branch on canonical inputs.
+## Uses pure kinematic prediction; `step()` overrides with the drag-
+## aware path via `_predict_intercept_drag_aware` so diagonals don't
+## get falsely rejected by the give-up gate.
 func compute_save_decision(ball_pos: Vector3, ball_v: Vector3) -> Dictionary:
+	var pre: Dictionary = _kinematic_intercept(ball_pos, ball_v)
+	if pre.decision != &"_proceed":
+		return pre
+	return _apply_decision_gates(pre.t_flight, pre.intercept_x,
+		pre.predicted_height)
+
+
+## Internal — pure kinematic intercept prediction (no drag). Returns
+## either an early-out decision dict (idle when not heading at goal,
+## outside shot zone, or t_flight <= 0) OR a "_proceed" stub dict
+## with `t_flight`, `intercept_x`, `predicted_height` for the gates.
+func _kinematic_intercept(ball_pos: Vector3, ball_v: Vector3) -> Dictionary:
 	var dz: float = goal_z - ball_pos.z
 	var heading_toward_goal: bool = (signf(dz) == signf(ball_v.z)) \
 		and absf(ball_v.z) > save_min_ball_speed_z_m_s
 	if not heading_toward_goal:
 		return {"decision": &"idle", "t_flight": 0.0,
 			"intercept_x": NAN, "predicted_height": 0.0}
-	# Shot-zone gate: only treat as a shot when the ball is within
-	# `shot_zone_m` of the goal line. Beyond that it's a midfield
-	# pass / clearance — defenders / drag handle it, GK stays idle.
 	if absf(dz) > shot_zone_m:
 		return {"decision": &"idle", "t_flight": 0.0,
 			"intercept_x": NAN, "predicted_height": 0.0}
-	var t_flight: float = dz / ball_v.z  ## same sign → positive
+	var t_flight: float = dz / ball_v.z
 	if t_flight <= 0.0:
 		return {"decision": &"idle", "t_flight": 0.0,
 			"intercept_x": NAN, "predicted_height": 0.0}
-	# R04-F04 — 1-axis intercept. Phase 2 ignores drag (acceptable
-	# error for <1 s flights at typical shot speeds; F04 calls out
-	# kinematic prediction as sufficient).
 	var intercept_x: float = ball_pos.x + ball_v.x * t_flight
-	# Predicted height at crossing (under gravity, no drag).
 	var predicted_height: float = ball_pos.y + ball_v.y * t_flight \
 		- 0.5 * gravity_m_s2 * t_flight * t_flight
-	# R04-F06 — give-up gates.
-	if absf(intercept_x) > goal_half_width_m:
+	return {"decision": &"_proceed", "t_flight": t_flight,
+		"intercept_x": intercept_x, "predicted_height": predicted_height}
+
+
+## Internal — apply give-up + reachability gates to a precomputed
+## (t_flight, intercept_x, predicted_height) triple. Same code path
+## for kinematic and drag-aware predictions.
+func _apply_decision_gates(t_flight: float, intercept_x: float,
+		predicted_height: float) -> Dictionary:
+	# R04-F06 — give-up gates. Save zone is the goal mouth EXTENDED
+	# by `catch_radius_m`: the keeper can dive that far past the
+	# post and still snag the ball with their fingertips. Without
+	# this margin, kinematic over-prediction on diagonals (no drag
+	# accounted for) falsely landed intercept_x just outside the
+	# post and the GK gave up — playtest 2026-05-15.
+	var save_zone_x: float = goal_half_width_m + catch_radius_m
+	if absf(intercept_x) > save_zone_x:
 		return {"decision": &"idle", "t_flight": t_flight,
 			"intercept_x": intercept_x, "predicted_height": predicted_height}
 	if predicted_height > crossbar_height_m:
 		return {"decision": &"idle", "t_flight": t_flight,
 			"intercept_x": intercept_x, "predicted_height": predicted_height}
-	# R04-F01 — reachability gate.
+	# R04-F01 — reachability.
 	var d_lat: float = absf(intercept_x - goalkeeper.global_position.x)
 	var d_eff: float = maxf(0.0, d_lat - catch_radius_m)
 	var t_av: float = maxf(0.0, t_flight - reaction_buffer_s)
 	var move_time_required: float = d_eff / gk_speed if gk_speed > 0.0 else INF
 	if move_time_required > t_av:
-		# R04-F02 — cannot reach by walking inside the response budget;
-		# teleport to intercept_x (visible cheat, intentional).
 		return {"decision": &"snap", "t_flight": t_flight,
 			"intercept_x": intercept_x, "predicted_height": predicted_height}
-	# Reachable by movement — steer toward the intercept.
 	return {"decision": &"save", "t_flight": t_flight,
 		"intercept_x": intercept_x, "predicted_height": predicted_height}
+
+
+## Drag-aware intercept prediction using BallPhysics.predict_forward.
+## Returns the same {decision, t_flight, intercept_x, predicted_height}
+## shape as compute_save_decision. step() prefers this so diagonal
+## shots account for drag (kinematic over-predicts X displacement
+## by 10–20 % over typical shot flights).
+func _predict_intercept_drag_aware(ball_pos: Vector3, ball_v: Vector3) -> Dictionary:
+	var pre: Dictionary = _kinematic_intercept(ball_pos, ball_v)
+	if pre.decision != &"_proceed":
+		return pre
+	if ball == null or not ball.has_method("predict_forward"):
+		return _apply_decision_gates(pre.t_flight, pre.intercept_x,
+			pre.predicted_height)
+	var t_flight: float = pre.t_flight
+	var sub_dt: float = 1.0 / 60.0
+	var steps: int = int(ceil(t_flight / sub_dt))
+	if steps <= 0:
+		return _apply_decision_gates(t_flight, pre.intercept_x,
+			pre.predicted_height)
+	var omega: Vector3 = ball.angular_velocity \
+		if ball is RigidBody3D else Vector3.ZERO
+	var arr: PackedVector3Array = ball.predict_forward(ball_pos, ball_v,
+		omega, 0.0, steps, sub_dt)
+	if arr.size() == 0:
+		return _apply_decision_gates(t_flight, pre.intercept_x,
+			pre.predicted_height)
+	var landing: Vector3 = arr[arr.size() - 1]
+	return _apply_decision_gates(t_flight, landing.x, landing.y)
 
 
 # ---- Decision executors -------------------------------------------------

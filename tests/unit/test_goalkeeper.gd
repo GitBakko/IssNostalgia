@@ -94,6 +94,23 @@ func test_decision_idle_when_ball_outside_shot_zone() -> void:
 		"Ball outside shot_zone_m must NOT trigger save mode")
 
 
+func test_decision_handles_diagonal_just_outside_post() -> void:
+	# Regression: playtest 2026-05-15 — diagonal shot lands just
+	# beyond the post at the kinematic level but inside the dive
+	# reach (post + catch_radius). Must NOT give up.
+	gk_player.global_position = Vector3(0.0, 0.0, -51.0)
+	# Ball at (0, 0.3, -45), vel (10, 0, -10). t_flight = 1.0 s,
+	# kinematic intercept = 10 → way outside post. Pick a softer
+	# vx that lands just beyond the post.
+	# vx=3.5, t_flight=1.0 → kinematic intercept = 3.5. Outside
+	# 3.2 post but inside 3.9 (3.2 + 0.7) save zone → must save.
+	var d: Dictionary = gk.compute_save_decision(
+		Vector3(0.0, 0.3, -42.5),
+		Vector3(3.5, 0.0, -10.0))
+	assert_ne(d.decision, &"idle",
+		"Diagonal landing within post + catch_radius must NOT give up")
+
+
 func test_decision_save_for_slow_shot_near_post() -> void:
 	# Regression: playtest 2026-05-15 — slow shot near post, GK was
 	# idle and let it pass. Slow vz (-2 m/s) inside shot zone with
@@ -165,11 +182,14 @@ func test_snap_teleports_gk_to_intercept_x() -> void:
 	ball.linear_velocity = Vector3(10.0, 0.0, -25.0)
 	gk.step(1.0 / 120.0)
 	assert_eq(gk.get_last_decision(), &"snap")
-	var d: Dictionary = gk.compute_save_decision(
+	# step() uses the drag-aware path, so GK X must match the drag-
+	# aware intercept (slightly less than the kinematic 3.0 due to
+	# air drag over the 0.3 s flight).
+	var d: Dictionary = gk._predict_intercept_drag_aware(
 		Vector3(0.0, 0.4, -45.0),
 		Vector3(10.0, 0.0, -25.0))
 	assert_almost_eq(gk_player.global_position.x, d.intercept_x, 0.01,
-		"On snap, GK X must equal intercept_x")
+		"On snap, GK X must equal drag-aware intercept_x")
 
 
 func test_catch_intercepts_ball_inside_radius() -> void:
