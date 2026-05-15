@@ -204,3 +204,49 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | 2026-05-15 | T05-fix1 | GK catch resolution — ball was phasing through GK because BallPhysics custom_integrator skips dynamic-body contacts. Explicit Goalkeeper._try_catch() snaps ball to chest within catch_radius_m. |
 | 2026-05-15 | T06 | NBA Jam catch-up boost SCHEMA on Goalkeeper. 5 @export params + 2 hooks (`get_effective_reaction_buffer_s`, `is_catchup_eligible` stub). Runtime activation Sprint 9 (requires scoreboard). |
 | 2026-05-15 | T07 | 196/196 PASS, 5.81 s headless. Target ≥145 met +51. Mobile FPS perf pass deferred Sprint 10. |
+
+
+---
+
+## Sprint 09 — Discuss Phase (decisioni accettate, 2026-05-15)
+
+- **Per-player attributes infrastructure** (T01) — `TeamConfig.tres`
+  acquires per-player rows for `close_control` ∈ [0,1] and
+  `dribble_skill` ∈ [0,1]. `Player.gd` exposes the same as `@export`,
+  populated from config in `GameMatch._instantiate_players`.
+- **Close-control modal** (T02) — new `*_tight_control` input action
+  (key `Z` for P1, numpad chosen at impl time for P2). When held,
+  `Player.tight_control_held = true`. `BallController` reads the
+  carrier's effective carry offset / loss threshold via Player API,
+  no more global constants for these knobs.
+- **Match clock + scoreboard** (T03) — `MatchClock` 4-min default,
+  `Scoreboard` simple `int + int + signal`. Goal detection: ball.z
+  past ±52.5 with no GK catch in last 0.5 s. Pause/resume reserved
+  for Sprint 10 celebrations.
+- **Catch-up runtime** (T04) — `Goalkeeper.is_catchup_eligible` reads
+  real `Scoreboard` + `MatchClock`, no longer a `false` stub. Trigger:
+  trailing by ≥ `trailing_goal_threshold` AND `time_remaining ≤
+  time_remaining_threshold_s`. Schema params unchanged from S08.
+- **StaticAI half-change hybrid** (T05) — augments the 2 Hz polling
+  with an event trigger on `signf(ball.z)` change, debounced by
+  `min_seconds_since_event_trigger = 1.5` and gated by `|ball.z| > 5`
+  to ignore wobbles around the centre line.
+- **Camera polish (R06-F03/F07) + aftertouch (R09-F07)** — DEFERRED
+  to Sprint 10 bundle. Touch-input pass (R07) likely runs alongside
+  there; pairing makes more sense than scattering polish across S9.
+- **R04-F03 controlled-hesitation reaction delay** stays Phase 3.
+- **R05-F07 Temporal Voronoi** stays Phase 3.
+
+### Sprint 09 — Findings → Code Mapping (popolato a fine sprint, T08)
+
+| Finding | File:func / commit | Status |
+|---------|--------------------|--------|
+| R02-F04 attribute-driven extension | _TBD T01_ | _PENDING_ |
+| R02-F07 close-control modal + tight control | _TBD T02_ | _PENDING_ |
+| R05-F03 half-change event hybrid | _TBD T05_ | _PENDING_ |
+| R09-F02 catch-up runtime activation | _TBD T04_ | _PENDING_ |
+
+### Sprint 09 — Calibration Sessions
+
+| Date       | Task   | Notes |
+|------------|--------|-------|
