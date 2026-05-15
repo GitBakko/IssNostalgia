@@ -64,9 +64,18 @@ extends Node
 ## restores possession naturally on the next pickup tick.
 @export var catch_hold_height_m: float = 0.90
 ## Min ball speed toward goal (Z component magnitude) to consider
-## the shot a "save scenario". Below this the ball is loose / pass
-## and the GK stays in idle mode.
-@export var save_min_ball_speed_z_m_s: float = 4.0
+## the ball "in motion" at all. Anything below this is loose ball
+## settling — no save scenario. Set low (0.5) so even slow shots
+## near goal are considered for the save path; the shot zone gate
+## below filters out distant passes.
+@export var save_min_ball_speed_z_m_s: float = 0.5
+## Distance gate (m, along Z) within which a ball heading toward
+## our goal is treated as a shot. Beyond this it's a midfield pass /
+## clearance — GK stays idle. 25 m covers the attacking third
+## (penalty area + a margin) without reacting to halfway-line shots
+## that any drag/save would beat. Playtest 2026-05-15 — was missing,
+## causing slow shots to fall under the save_min gate and slip past.
+@export var shot_zone_m: float = 25.0
 ## Gravity used in the predicted-height calc. Matches project gravity.
 @export var gravity_m_s2: float = 9.81
 
@@ -133,6 +142,12 @@ func compute_save_decision(ball_pos: Vector3, ball_v: Vector3) -> Dictionary:
 	var heading_toward_goal: bool = (signf(dz) == signf(ball_v.z)) \
 		and absf(ball_v.z) > save_min_ball_speed_z_m_s
 	if not heading_toward_goal:
+		return {"decision": &"idle", "t_flight": 0.0,
+			"intercept_x": NAN, "predicted_height": 0.0}
+	# Shot-zone gate: only treat as a shot when the ball is within
+	# `shot_zone_m` of the goal line. Beyond that it's a midfield
+	# pass / clearance — defenders / drag handle it, GK stays idle.
+	if absf(dz) > shot_zone_m:
 		return {"decision": &"idle", "t_flight": 0.0,
 			"intercept_x": NAN, "predicted_height": 0.0}
 	var t_flight: float = dz / ball_v.z  ## same sign → positive

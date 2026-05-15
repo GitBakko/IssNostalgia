@@ -72,13 +72,40 @@ func test_decision_idle_when_ball_not_heading_toward_goal() -> void:
 	assert_eq(d.decision, &"idle")
 
 
-func test_decision_idle_when_ball_too_slow_in_z() -> void:
-	# Ball heading toward goal but below save_min_ball_speed_z_m_s.
+func test_decision_idle_when_ball_essentially_still_in_z() -> void:
+	# Ball heading toward goal but below save_min_ball_speed_z_m_s
+	# (loose-ball settling). With save_min lowered to 0.5 m/s in
+	# fix2, the threshold catches only essentially-still balls.
 	var d: Dictionary = gk.compute_save_decision(
 		Vector3(0.0, 0.3, -10.0),
-		Vector3(0.0, 0.0, -1.0))  ## |vz|=1, below 4 m/s threshold
+		Vector3(0.0, 0.0, -0.2))  ## |vz|=0.2, below 0.5 m/s threshold
 	assert_eq(d.decision, &"idle",
-		"Slow ball toward goal = pass / loose, not a save scenario")
+		"Essentially still ball = loose, not a save scenario")
+
+
+func test_decision_idle_when_ball_outside_shot_zone() -> void:
+	# Ball heading toward goal at a savable speed BUT far from goal
+	# line (> shot_zone_m). Midfield clearance — GK stays idle.
+	gk_player.global_position = Vector3(0.0, 0.0, -51.0)
+	var d: Dictionary = gk.compute_save_decision(
+		Vector3(0.0, 0.3, -10.0),  ## |dz| = 42.5 m, > 25 m shot zone
+		Vector3(0.0, 0.0, -10.0))
+	assert_eq(d.decision, &"idle",
+		"Ball outside shot_zone_m must NOT trigger save mode")
+
+
+func test_decision_save_for_slow_shot_near_post() -> void:
+	# Regression: playtest 2026-05-15 — slow shot near post, GK was
+	# idle and let it pass. Slow vz (-2 m/s) inside shot zone with
+	# intercept near post must trigger save (not idle).
+	gk_player.global_position = Vector3(1.0, 0.0, -51.0)
+	var d: Dictionary = gk.compute_save_decision(
+		Vector3(2.5, 0.3, -45.0),
+		Vector3(0.0, 0.0, -2.0))
+	assert_ne(d.decision, &"idle",
+		"Slow shot near post inside shot zone must trigger save / snap")
+	assert_almost_eq(d.intercept_x, 2.5, 0.001,
+		"Intercept X must equal ball.x + vx*t = 2.5 (vx=0)")
 
 
 func test_decision_save_when_reachable_within_budget() -> void:
