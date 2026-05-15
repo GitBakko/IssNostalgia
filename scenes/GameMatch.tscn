@@ -26,7 +26,7 @@ roughness = 0.85
 size = Vector2(105, 68)
 
 [sub_resource type="BoxShape3D" id="BoxShape_floor"]
-size = Vector3(105, 0.1, 68)
+size = Vector3(300, 0.1, 300)
 
 [sub_resource type="StandardMaterial3D" id="Mat_goal"]
 albedo_color = Color(0.95, 0.95, 0.95, 1)
@@ -52,7 +52,6 @@ shadow_enabled = true
 collision_mask = 0
 
 [node name="PitchMesh" type="MeshInstance3D" parent="Pitch" unique_id=853200694]
-transform = Transform3D(0.9496937, 0, 0.3131804, 0, 1, 0, -0.3131804, 0, 0.9496937, -0.10293627, -0.02909547, 0.07434511)
 material_override = SubResource("Mat_pitch")
 mesh = SubResource("PlaneMesh_pitch")
 
