@@ -135,6 +135,10 @@ var _debug_return_target: Player = null
 ## release). Ball is actively pinned to the chest each tick so
 ## gravity / drag don't drop it.
 var _holding_ball: bool = false
+## Brief lockout AFTER a release so `_try_catch` doesn't immediately
+## re-grab the just-launched ball (it's still at the GK position
+## the same tick the launch fires — gravity hasn't moved it yet).
+var _post_release_lockout_s: float = 0.0
 
 
 func _physics_process(delta: float) -> void:
@@ -168,6 +172,9 @@ func step(delta: float) -> void:
 	# integrator only resolves ground / wall contacts). Catch only
 	# fires while we're not already the carrier — avoids re-triggering
 	# every tick while holding the ball.
+	if _post_release_lockout_s > 0.0:
+		_post_release_lockout_s = maxf(0.0,
+			_post_release_lockout_s - delta)
 	_try_catch()
 	_pin_held_ball()
 	_drain_debug_return(delta)
@@ -375,12 +382,21 @@ func _drain_debug_return(dt: float) -> void:
 	var v: Vector3 = Vector3(dir.x * debug_return_pass_speed_m_s,
 		debug_return_pass_lift_m_s,
 		dir.z * debug_return_pass_speed_m_s)
-	# Release possession before launching; otherwise the BallPhysics
-	# integrator stays in possessed-skip mode and the launch state
-	# never integrates.
+	# Release sequence:
+	#   1. clear possession + holding flag
+	#   2. teleport the ball OUT of the catch radius along the kick
+	#      direction (otherwise next tick's `_try_catch` re-catches it)
+	#   3. stage the launch velocity
+	#   4. arm a brief catch lockout as a belt + braces guard
 	ball.clear_possession()
 	_holding_ball = false
+	var release_offset_m: float = catch_radius_m + 0.6
+	var release_pos: Vector3 = goalkeeper.global_position \
+		+ dir * release_offset_m
+	release_pos.y = catch_hold_height_m
+	ball.teleport_to(release_pos)
 	ball.apply_launch_state(v, Vector3.ZERO)
+	_post_release_lockout_s = 0.4
 	_last_decision = &"debug_return"
 
 
@@ -415,6 +431,8 @@ func _try_catch() -> void:
 	if ball == null or goalkeeper == null:
 		return
 	if ball.get_possessor() == goalkeeper:
+		return
+	if _post_release_lockout_s > 0.0:
 		return
 	var bp: Vector3 = ball.global_position
 	var gp: Vector3 = goalkeeper.global_position
