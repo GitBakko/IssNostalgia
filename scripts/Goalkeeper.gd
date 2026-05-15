@@ -70,6 +70,25 @@ extends Node
 ## Gravity used in the predicted-height calc. Matches project gravity.
 @export var gravity_m_s2: float = 9.81
 
+@export_group("NBA Jam catch-up boost (R09-F02 — schema only)")
+## T06 schema only — eligibility wiring requires the scoreboard
+## (Sprint 9). When `false` (default) all catch-up modifiers are
+## inert; `get_effective_reaction_buffer_s()` returns the raw
+## `reaction_buffer_s` regardless of score state.
+@export var catchup_boost_enabled: bool = false
+## Trailing goal margin that arms the boost (R09-F02).
+@export var trailing_goal_threshold: int = 2
+## Match time-remaining window (s) the boost is active in (R09-F02).
+@export var time_remaining_threshold_s: float = 60.0
+## Shot-accuracy multiplier added to the trailing team's shooter
+## (R09-F02). Schema only — applied in Sprint 9 by ShootingController.
+@export var catchup_accuracy_boost: float = 0.125
+## GK reaction-buffer multiplier when the GK's team is LEADING
+## (i.e. the trailing AI shoots → the leading GK gets a slower
+## reaction). 0.85 = 15 % faster reaction → smaller t_av buffer →
+## SNAP fires earlier and the comeback team scores more easily.
+@export var catchup_gk_reaction_factor: float = 0.85
+
 # ---- Runtime state -------------------------------------------------------
 var _last_decision: StringName = &"idle"
 
@@ -193,6 +212,27 @@ func _perform_snap(intercept_x: float) -> void:
 ## Read-only accessor for tests / HUD.
 func get_last_decision() -> StringName:
 	return _last_decision
+
+
+## R09-F02 schema hook — return the reaction buffer to use in the
+## reachability gate, optionally scaled by the catch-up boost when
+## eligible. In Sprint 8 the eligibility check is a stub that
+## always returns false (no scoreboard yet); Sprint 9 wires it to
+## the actual score + clock. Always safe to call.
+func get_effective_reaction_buffer_s() -> float:
+	if not catchup_boost_enabled:
+		return reaction_buffer_s
+	if not is_catchup_eligible():
+		return reaction_buffer_s
+	return reaction_buffer_s * catchup_gk_reaction_factor
+
+
+## R09-F02 schema hook — eligibility predicate. Sprint 8 stub:
+## ALWAYS returns false (the scoreboard / match clock that would
+## populate a real check don't exist yet). Sprint 9 will inject a
+## scoreboard reference and replace the body.
+func is_catchup_eligible() -> bool:
+	return false
 
 
 ## Explicit catch resolution — needed because BallPhysics runs with

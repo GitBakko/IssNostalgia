@@ -166,7 +166,7 @@ Vedi colonna **"Used in Sprint"** in `RESEARCH_INDEX.md`. Aggiornata a fine spri
 | R04-F04 1-axis intercept formula | `Goalkeeper.compute_save_decision` (kinematic, drag skipped per F04 sufficiency note) | APPLIED T05 |
 | R04-F05 idle position = ball_x * 0.5 angle bisect | `Goalkeeper._perform_idle` | APPLIED T05 |
 | R04-F06 give-up gate (post + crossbar) | `Goalkeeper.compute_save_decision` (idle on `abs(intercept_x) > goal_half_width_m` OR `predicted_height > crossbar_height_m`) | APPLIED T05 |
-| R09-F02 NBA Jam catch-up boost (schema-only) | _TBD T06_ | _PENDING_ |
+| R09-F02 NBA Jam catch-up boost (schema-only Sprint 8) | `Goalkeeper.get_effective_reaction_buffer_s` + `is_catchup_eligible` (Sprint 8 stub returns false; Sprint 9 wires scoreboard) | APPLIED-SCHEMA T06 |
 
 ### Sprint 08 — Calibration Sessions
 

@@ -192,6 +192,27 @@ func test_catch_skipped_when_ball_outside_radius() -> void:
 		"Ball outside catch_radius must NOT be caught")
 
 
+# ---- T06 NBA Jam catch-up boost (R09-F02 — schema only) ----------------
+
+func test_catchup_boost_disabled_by_default() -> void:
+	# Default ctor → catchup_boost_enabled = false. Effective reaction
+	# buffer must equal the raw reaction_buffer_s.
+	assert_false(gk.catchup_boost_enabled,
+		"catchup_boost_enabled must default to false in Sprint 8")
+	assert_eq(gk.get_effective_reaction_buffer_s(), gk.reaction_buffer_s,
+		"With boost disabled, effective buffer = raw buffer")
+
+
+func test_catchup_eligibility_returns_false_without_scoreboard() -> void:
+	# Sprint 8 stub — eligibility always false (no scoreboard yet).
+	# Even when catchup_boost_enabled is on, the boost stays inert.
+	gk.catchup_boost_enabled = true
+	assert_false(gk.is_catchup_eligible(),
+		"Sprint 8 eligibility stub must always return false")
+	assert_eq(gk.get_effective_reaction_buffer_s(), gk.reaction_buffer_s,
+		"Effective buffer unchanged while eligibility returns false")
+
+
 func test_player_state_marks_saving_during_save_or_snap() -> void:
 	gk_player.global_position = Vector3(0.0, 0.0, -51.0)
 	ball.global_position = Vector3(0.5, 0.4, -42.0)
