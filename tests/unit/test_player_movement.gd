@@ -246,3 +246,40 @@ func test_player_attributes_default_to_midpoint() -> void:
 		"Default dribble_skill must be midpoint 0.5")
 	assert_false(player.has_tight_control,
 		"has_tight_control must default to false")
+
+
+# ---- S09-T02 close-control modal API ---------------------------------
+
+func test_carry_offset_collapses_to_min_when_stopped_with_tight_control() -> void:
+	# At rest + tight_control held + max close_control → ball sits
+	# at the foot (offset = min).
+	player.close_control = 1.0
+	player.has_tight_control = true
+	var offset: float = player.get_effective_carry_offset(0.0, 0.55)
+	assert_almost_eq(offset, 0.30, 0.001,
+		"Stopped tight-control elite must collapse to min_offset (0.30)")
+
+
+func test_carry_offset_uses_base_when_sprinting_and_low_skill() -> void:
+	# Full speed + zero closeness → offset rides the base.
+	player.close_control = 0.0
+	player.has_tight_control = false
+	var offset: float = player.get_effective_carry_offset(player.max_walk_speed, 0.55)
+	assert_almost_eq(offset, 0.55, 0.005,
+		"Sprinting low-skill carrier must ride the base offset")
+
+
+func test_loss_threshold_extended_by_tight_control_modal() -> void:
+	player.close_control = 0.0
+	player.has_tight_control = true
+	var threshold: float = player.get_effective_loss_threshold(3.0)
+	assert_almost_eq(threshold, 3.75, 0.001,
+		"Tight-control modal adds +25 % of base (3.0 → 3.75)")
+
+
+func test_loss_threshold_extended_by_close_control_attribute() -> void:
+	player.close_control = 1.0
+	player.has_tight_control = false
+	var threshold: float = player.get_effective_loss_threshold(3.0)
+	assert_almost_eq(threshold, 3.45, 0.001,
+		"Max close_control adds +15 % of base (3.0 → 3.45)")

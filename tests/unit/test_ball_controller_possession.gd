@@ -546,6 +546,45 @@ func test_pickup_resumes_after_lockout_expires() -> void:
 		"After lockout drains, normal pickup resumes")
 
 
+# ---- S09-T02 BallController consumes per-carrier carry offset + loss --
+
+func test_loss_threshold_uses_carrier_extension_when_tight_control() -> void:
+	# At a distance just over the GLOBAL loss_threshold (3.0) but
+	# inside the tight-control extension (3.75), the ball should
+	# NOT count as lost — Player API extends the leash.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.has_tight_control = true
+	p.close_control = 0.0
+	bc._assign_carrier(p)
+	# Ball at 3.30 m — over 3.0 base, under 3.75 extended.
+	ball.global_position = Vector3(0.0, 0.11, -3.30)
+	bc._check_loss()
+	assert_eq(bc.get_carrier(), p,
+		"Tight-control carrier keeps possession at 3.30 m (extended threshold 3.75)")
+
+
+func test_loss_fires_past_extended_threshold() -> void:
+	# Same setup but ball drifts past the extension — loss fires.
+	var p: Player = players_a[0]
+	p.global_position = Vector3.ZERO
+	p.has_tight_control = true
+	p.close_control = 0.0
+	bc._assign_carrier(p)
+	ball.global_position = Vector3(0.0, 0.11, -4.0)  ## > 3.75 extended
+	bc._check_loss()
+	assert_null(bc.get_carrier(),
+		"Past the extended threshold, possession is still lost")
+
+
+func test_carry_offset_helper_falls_back_when_carrier_missing_api() -> void:
+	# A carrier-shaped Node that does NOT expose the API must get
+	# the global `turn_glue_offset_m` back unchanged.
+	bc._carrier = null
+	assert_almost_eq(bc._carry_offset_for_carrier(5.0), bc.turn_glue_offset_m, 0.001,
+		"No carrier → return global turn_glue_offset_m")
+
+
 # ---- S09-T01 per-player dribble_skill drives kick factor ---------------
 
 func test_kick_factor_uses_high_skill_envelope_for_elite_dribbler() -> void:

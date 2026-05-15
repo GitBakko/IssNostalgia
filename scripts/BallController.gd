@@ -278,7 +278,14 @@ func _check_loss() -> bool:
 		return false
 	var dx: float = ball.global_position.x - _carrier.global_position.x
 	var dz: float = ball.global_position.z - _carrier.global_position.z
-	if dx * dx + dz * dz > loss_threshold_m * loss_threshold_m:
+	# Sprint 9 T02 — per-carrier loss threshold (R02-F07: tight
+	# control + close_control attribute extends the leash). Falls
+	# back to the global constant when the carrier doesn't expose
+	# the API (defensive — covers test fixtures).
+	var threshold: float = loss_threshold_m
+	if _carrier.has_method("get_effective_loss_threshold"):
+		threshold = _carrier.get_effective_loss_threshold(loss_threshold_m)
+	if dx * dx + dz * dz > threshold * threshold:
 		if debug_log:
 			print("[BallController] LOSS — %s lost ball at d=%.2fm" % [
 				_carrier.name, sqrt(dx * dx + dz * dz),
@@ -365,6 +372,18 @@ func _tick_dribble_impulses(delta: float) -> void:
 	_apply_magnetic_centering(delta, carrier_v, carrier_speed)
 
 
+## Per-carrier carry offset (R02-F07). Falls back to the global
+## `turn_glue_offset_m` when the carrier doesn't expose the
+## attribute API — keeps unit tests / non-Player carriers working.
+func _carry_offset_for_carrier(carrier_speed: float) -> float:
+	if _carrier == null:
+		return turn_glue_offset_m
+	if not _carrier.has_method("get_effective_carry_offset"):
+		return turn_glue_offset_m
+	return _carrier.get_effective_carry_offset(carrier_speed,
+		turn_glue_offset_m)
+
+
 ## Carry direction = same blend used by the kick (visual_forward +
 ## velocity dir, weighted by `kick_direction_blend_visual`). Returns
 ## a unit vector or ZERO if neither input was usable. Kept for the
@@ -426,9 +445,13 @@ func _apply_turn_glue(carrier_v: Vector3, _carrier_speed: float) -> bool:
 		return false  ## no meaningful turn this tick
 	# HARD GLUE — ball snaps to the carrier's foot zone in the new
 	# visual heading, velocity matches the carrier so the ball
-	# continues with the player on the next tick.
-	var ideal_x: float = p_pos.x + fwd_now.x * turn_glue_offset_m
-	var ideal_z: float = p_pos.z + fwd_now.z * turn_glue_offset_m
+	# continues with the player on the next tick. S09-T02: per-
+	# carrier offset (R02-F07 close_control + tight control modal).
+	var carry_speed: float = sqrt(carrier_v.x * carrier_v.x \
+		+ carrier_v.z * carrier_v.z)
+	var carry_offset: float = _carry_offset_for_carrier(carry_speed)
+	var ideal_x: float = p_pos.x + fwd_now.x * carry_offset
+	var ideal_z: float = p_pos.z + fwd_now.z * carry_offset
 	ball.teleport_to(Vector3(ideal_x, b_pos.y, ideal_z))
 	ball.apply_launch_state(Vector3(carrier_v.x,
 		ball.linear_velocity.y, carrier_v.z))
@@ -463,8 +486,13 @@ func _apply_stop_glue(carrier_v: Vector3, _carrier_speed: float) -> bool:
 	var fwd: Vector3 = _carrier.get_visual_forward()
 	if fwd.length_squared() < 0.001:
 		return false
-	var ideal_x: float = p_pos.x + fwd.x * turn_glue_offset_m
-	var ideal_z: float = p_pos.z + fwd.z * turn_glue_offset_m
+	# S09-T02 — per-carrier offset. Stop intent → speed ≈ 0, so the
+	# offset will collapse toward `min_offset` (close-control wins).
+	var carry_speed: float = sqrt(carrier_v.x * carrier_v.x \
+		+ carrier_v.z * carrier_v.z)
+	var carry_offset: float = _carry_offset_for_carrier(carry_speed)
+	var ideal_x: float = p_pos.x + fwd.x * carry_offset
+	var ideal_z: float = p_pos.z + fwd.z * carry_offset
 	ball.teleport_to(Vector3(ideal_x, b_pos.y, ideal_z))
 	ball.apply_launch_state(Vector3(carrier_v.x,
 		ball.linear_velocity.y, carrier_v.z))

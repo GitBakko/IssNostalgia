@@ -340,6 +340,43 @@ func is_stop_intent_active() -> bool:
 	return _intended_input_dir.length_squared() < 1.0e-4
 
 
+## R02-F07 — effective carry offset for the ball during the
+## turn-glue snap. Modulates `base` toward `min_offset` based on
+## the carrier's "closeness" (tight-control modal + close_control
+## attribute ABOVE midpoint). At default `close_control = 0.5`
+## with no modal, returns `base` unchanged so Sprint 8 behaviour
+## is preserved. Closeness only kicks in for elite close-control
+## players or when the player explicitly holds the modal key.
+func get_effective_carry_offset(planar_speed: float, base: float) -> float:
+	var modal_boost: float = 0.5 if has_tight_control else 0.0
+	# Attribute contribution: only the half above midpoint counts.
+	var attr_boost: float = maxf(0.0, close_control - 0.5) * 2.0
+	var closeness: float = clampf(modal_boost + attr_boost, 0.0, 1.0)
+	if closeness < 0.001:
+		return base  ## legacy carrier — ride the constant
+	var min_offset: float = 0.30
+	var speed_factor: float = clampf(planar_speed / max_walk_speed,
+		0.0, 1.0)
+	# At high speed and low closeness, ride the base. At low speed
+	# and high closeness, shrink toward min. Closeness halves the
+	# speed factor's pull toward base.
+	var f: float = clampf(speed_factor * (1.0 - closeness * 0.5),
+		0.0, 1.0)
+	return lerpf(min_offset, base, f)
+
+
+## R02-F07 — effective loss threshold extension. Tight-control
+## modal (+25 % of base) + close_control attribute ABOVE midpoint
+## (up to +15 %). At default `close_control = 0.5` with no modal,
+## returns `base` unchanged so Sprint 8 behaviour is preserved.
+func get_effective_loss_threshold(base: float) -> float:
+	var bonus: float = 0.0
+	if has_tight_control:
+		bonus += 0.25 * base
+	bonus += 0.15 * base * maxf(0.0, close_control - 0.5) * 2.0
+	return base + bonus
+
+
 ## Arm a pickup input-lock window. While the lock drains, direction
 ## input is overridden — committed direction follows `_facing_target`
 ## (which BallController sets toward the incoming ball via
