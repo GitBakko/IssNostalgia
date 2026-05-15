@@ -41,10 +41,17 @@ extends Node
 ## sign is applied internally relative to `goal_z`).
 @export var idle_forward_offset_m: float = 1.0
 ## GK lateral / forward speed cap, m/s. R04 Phase 2 spec value.
+## Used by SAVE branch (steer toward intercept_x at full pace).
 @export var gk_speed: float = 6.0
-## Idle lerp factor per tick — exponential pull toward the idle
-## target. 0.15 → ~99 % closure in 30 ticks at 120 Hz.
-@export var idle_lerp: float = 0.15
+## Slow re-positioning speed (m/s) used by the IDLE branch — the
+## "settling back" walk after a catch or while tracking a sideways
+## ball. Much lower than `gk_speed` so the keeper doesn't slingshot
+## back to centre after a save (playtest 2026-05-15).
+@export var idle_max_speed_m_s: float = 2.0
+## Hold window (s) after a catch — GK freezes in place to "hold
+## the ball" before resuming the idle drift. Reads as a natural
+## beat instead of an instant snap toward centre.
+@export var post_catch_hold_s: float = 0.6
 ## Reaction buffer (R04-F01 t_buf). Time subtracted from t_flight
 ## before comparing to the GK movement budget.
 @export var reaction_buffer_s: float = 0.05
@@ -100,6 +107,7 @@ extends Node
 
 # ---- Runtime state -------------------------------------------------------
 var _last_decision: StringName = &"idle"
+var _post_catch_hold_remaining_s: float = 0.0
 
 
 func _physics_process(delta: float) -> void:
@@ -186,16 +194,32 @@ func compute_save_decision(ball_pos: Vector3, ball_v: Vector3) -> Dictionary:
 # ---- Decision executors -------------------------------------------------
 
 ## R04-F05 — angle-bisect idle. Tracks ball X at half magnitude so
-## near-post is never exposed; clamps to the goal mouth.
+## near-post is never exposed; clamps to the goal mouth. Movement
+## uses a SPEED-clamped step (m/s, frame-rate-independent), NOT a
+## per-tick lerp — at 120 Hz a 0.15 lerp gives ~22 m/s effective
+## slingshot which reads as an unrealistic dash back to centre
+## (playtest 2026-05-15). Post-catch hold window freezes the GK
+## in place briefly so the idle drift starts from a beat, not an
+## instant snap.
 func _perform_idle(ball_pos: Vector3, dt: float) -> void:
 	goalkeeper.state = Player.State.IDLE
 	goalkeeper.clear_static_target()
+	var current: Vector3 = goalkeeper.global_position
+	var target_z: float = goal_z + signf(-goal_z) * idle_forward_offset_m
+	if _post_catch_hold_remaining_s > 0.0:
+		_post_catch_hold_remaining_s = maxf(0.0,
+			_post_catch_hold_remaining_s - dt)
+		# Hold position; stay at current X.
+		goalkeeper.global_position = Vector3(current.x, current.y, target_z)
+		goalkeeper.velocity = Vector3.ZERO
+		goalkeeper.mark_driven()
+		return
 	var idle_x: float = clampf(ball_pos.x * 0.5,
 		-goal_half_width_m, goal_half_width_m)
-	var current: Vector3 = goalkeeper.global_position
-	var target_x: float = lerpf(current.x, idle_x, idle_lerp)
-	var target_z: float = goal_z + signf(-goal_z) * idle_forward_offset_m
-	goalkeeper.global_position = Vector3(target_x, current.y, target_z)
+	var dx: float = idle_x - current.x
+	var max_step: float = idle_max_speed_m_s * dt
+	var step_x: float = clampf(dx, -max_step, max_step)
+	goalkeeper.global_position = Vector3(current.x + step_x, current.y, target_z)
 	goalkeeper.velocity = Vector3.ZERO
 	# Mark as driven so Player._physics_process doesn't re-apply the
 	# zero-input decel path.
@@ -276,3 +300,4 @@ func _try_catch() -> void:
 	ball.apply_launch_state(Vector3.ZERO, Vector3.ZERO)
 	ball.teleport_to(Vector3(gp.x, catch_hold_height_m, gp.z))
 	_last_decision = &"catch"
+	_post_catch_hold_remaining_s = post_catch_hold_s

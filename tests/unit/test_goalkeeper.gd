@@ -219,6 +219,43 @@ func test_catch_skipped_when_ball_outside_radius() -> void:
 		"Ball outside catch_radius must NOT be caught")
 
 
+# ---- Post-catch hold + speed-clamped idle (fix3) -----------------------
+
+func test_idle_uses_speed_clamped_step_not_lerp() -> void:
+	# After fix3, idle re-positioning uses idle_max_speed_m_s (2.0)
+	# instead of a per-tick lerp. Travel from x=0 to clamped target
+	# 2.0 (ball at x=4) must take ~1.0 s, not a single-tick snap.
+	gk_player.global_position = Vector3(0.0, 0.0, -51.5)
+	ball.global_position = Vector3(4.0, 0.11, 0.0)
+	ball.linear_velocity = Vector3.ZERO  ## sideways = idle
+	# After 0.10 s of 1/120 s ticks: max possible drift = 2.0 * 0.10 = 0.20 m.
+	for _i in 12:
+		gk.step(1.0 / 120.0)
+	assert_lt(gk_player.global_position.x, 0.25,
+		"After 0.10 s GK must have drifted ≤ idle_max_speed_m_s * dt total")
+
+
+func test_post_catch_hold_freezes_gk_position() -> void:
+	# Catch arms post_catch_hold_s window — during it, GK stays put
+	# even if ball.x changes radically.
+	gk_player.global_position = Vector3(2.0, 0.0, -51.5)
+	ball.global_position = Vector3(2.0, 0.4, -51.5)  ## triggers catch
+	ball.linear_velocity = Vector3.ZERO
+	gk.step(1.0 / 120.0)
+	assert_eq(gk.get_last_decision(), &"catch", "Sanity: catch fired")
+	assert_gt(gk._post_catch_hold_remaining_s, 0.0,
+		"Catch must arm the post-catch hold timer")
+	# Move ball way off (simulates pickup or rebound) and tick — GK
+	# must not slide.
+	ball.global_position = Vector3(-3.0, 0.11, -45.0)
+	ball.linear_velocity = Vector3.ZERO
+	var x_before: float = gk_player.global_position.x
+	for _i in 30:  ## 0.25 s — well inside hold (0.6 s default)
+		gk.step(1.0 / 120.0)
+	assert_almost_eq(gk_player.global_position.x, x_before, 0.001,
+		"During hold, GK X must not change despite ball X change")
+
+
 # ---- T06 NBA Jam catch-up boost (R09-F02 — schema only) ----------------
 
 func test_catchup_boost_disabled_by_default() -> void:
